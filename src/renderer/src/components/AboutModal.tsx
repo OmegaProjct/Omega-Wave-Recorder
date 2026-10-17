@@ -9,7 +9,7 @@ interface AboutModalProps {
 
 export const AboutModal: React.FC<AboutModalProps> = ({ onClose }) => {
   const { t } = useTranslation()
-  const [version, setVersion] = useState('0.1.3')
+  const [version, setVersion] = useState('0.1.4')
 
   useEffect(() => {
     async function loadVersion() {

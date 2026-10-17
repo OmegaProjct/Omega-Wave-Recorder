@@ -73,8 +73,11 @@ function downloadFileHttps(
 
       try {
         const parsedUrl = new URL(currentUrl)
+        const client = parsedUrl.protocol === 'http:' ? http : https
         const options = {
+          protocol: parsedUrl.protocol,
           hostname: parsedUrl.hostname,
+          port: parsedUrl.port || (parsedUrl.protocol === 'http:' ? 80 : 443),
           path: parsedUrl.pathname + parsedUrl.search,
           method: 'GET',
           headers: {
@@ -84,7 +87,7 @@ function downloadFileHttps(
           timeout: 45000
         }
 
-        const req = https.request(options, (res) => {
+        const req = client.request(options, (res) => {
           if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
             res.resume()
             const nextUrl = new URL(res.headers.location, currentUrl).toString()
@@ -178,8 +181,11 @@ export function setupUpdateDownloader(mainWindow?: BrowserWindow | null): void {
       const response = await fetch('https://api.github.com/repos/OmegaProjct/Omega-Wave-Recorder/releases/latest', {
         headers: {
           'User-Agent': 'Omega-Wave-Recorder-Updater',
-          'Accept': 'application/vnd.github.v3+json'
-        }
+          'Accept': 'application/vnd.github.v3+json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        },
+        cache: 'no-store'
       })
 
       if (response.status === 404) {

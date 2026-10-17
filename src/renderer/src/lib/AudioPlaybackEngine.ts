@@ -27,6 +27,8 @@ export class AudioPlaybackEngine {
   private masterGain: GainNode | null = null
   private trackNodes: Map<string, TrackNodeGroup> = new Map()
   private bufferCache: Map<string, AudioBuffer> = new Map()
+  private loadingPromises: Map<string, Promise<AudioBuffer>> = new Map()
+  private playbackRequest = 0
 
   private currentState: PlaybackState = 'stopped'
   private playheadPos: number = 0 // in seconds
@@ -46,18 +48,55 @@ export class AudioPlaybackEngine {
   }
 
   constructor() {
-    this.initContext()
+    if (typeof window !== 'undefined') {
+      this.initContext()
+    }
+  }
+
+  /**
+   * Helper: Convert Buffer, Uint8Array or ArrayBufferView from Electron IPC
+   * to an exact ArrayBuffer respecting byteOffset and byteLength.
+   */
+  public static toArrayBuffer(data: ArrayBuffer | ArrayBufferView | Buffer | any): ArrayBuffer {
+    if (!data) {
+      return new ArrayBuffer(0)
+    }
+    if (data instanceof ArrayBuffer) {
+      return data.slice(0)
+    }
+    if (ArrayBuffer.isView(data)) {
+      const view = data as ArrayBufferView
+      if (view.buffer instanceof ArrayBuffer) {
+        return (view.buffer as ArrayBuffer).slice(view.byteOffset, view.byteOffset + view.byteLength)
+      }
+      const copy = new Uint8Array(view.byteLength)
+      copy.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength))
+      return copy.buffer as ArrayBuffer
+    }
+    if (data.buffer instanceof ArrayBuffer && typeof data.byteOffset === 'number' && typeof data.byteLength === 'number') {
+      return (data.buffer as ArrayBuffer).slice(data.byteOffset, data.byteOffset + data.byteLength)
+    }
+    if (data.buffer instanceof ArrayBuffer) {
+      return (data.buffer as ArrayBuffer).slice(0)
+    }
+    return new ArrayBuffer(0)
+  }
+
+  public getSampleRate(): number {
+    return this.ctx?.sampleRate || 48000
   }
 
   private initContext(): AudioContext {
     if (!this.ctx || this.ctx.state === 'closed') {
-      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext
-      this.ctx = new AudioCtxClass({ latencyHint: 'interactive' })
-      this.masterGain = this.ctx.createGain()
-      this.masterGain.gain.value = 1.0
-      this.masterGain.connect(this.ctx.destination)
+      const AudioCtxClass = typeof window !== 'undefined' ? (window.AudioContext || (window as any).webkitAudioContext) : undefined
+      if (AudioCtxClass) {
+        this.ctx = new AudioCtxClass({ latencyHint: 'interactive' })
+        this.masterGain = this.ctx.createGain()
+        this.masterGain.gain.value = 1.0
+        this.masterGain.connect(this.ctx.destination)
+      }
     }
-    return this.ctx
+    return this.ctx!
   }
 
   public getState(): PlaybackState {
@@ -111,45 +150,73 @@ export class AudioPlaybackEngine {
 
   /**
    * Decodes and caches an audio buffer from a file path.
+   * Deduplicates concurrent loads and propagates load failures.
    */
-  public async loadAudioBuffer(filePath: string): Promise<AudioBuffer | null> {
+  public async loadAudioBuffer(filePath: string): Promise<AudioBuffer> {
     if (this.bufferCache.has(filePath)) {
       return this.bufferCache.get(filePath)!
     }
 
-    try {
-      let arrayBuffer: ArrayBuffer
-      if (window.api?.readFileBuffer) {
-        arrayBuffer = await window.api.readFileBuffer(filePath)
-      } else {
-        const res = await fetch(filePath)
-        arrayBuffer = await res.arrayBuffer()
-      }
-
-      const ctx = this.initContext()
-      // Use slice(0) to prevent buffer detaching issues across Web Audio decoders
-      const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0))
-      this.bufferCache.set(filePath, decoded)
-      return decoded
-    } catch (err) {
-      console.error(`[AudioPlaybackEngine] Failed to decode audio file ${filePath}:`, err)
-      return null
+    if (this.loadingPromises.has(filePath)) {
+      return await this.loadingPromises.get(filePath)!
     }
+
+    const loads = this.loadingPromises
+    const loadPromise = Promise.resolve().then(async () => {
+      try {
+        let rawData: any
+        const api = typeof window !== 'undefined' ? (window as any).api : undefined
+        if (api?.readFileBuffer) {
+          rawData = await api.readFileBuffer(filePath)
+        } else if (typeof fetch !== 'undefined') {
+          const res = await fetch(filePath)
+          if (!res.ok) {
+            throw new Error(`HTTP error ${res.status}: ${res.statusText}`)
+          }
+          rawData = await res.arrayBuffer()
+        } else {
+          throw new Error('No mechanism available to read file buffer')
+        }
+
+        const arrayBuffer = AudioPlaybackEngine.toArrayBuffer(rawData)
+        if (arrayBuffer.byteLength === 0) {
+          throw new Error(`Audio buffer is empty for file: ${filePath}`)
+        }
+
+        const ctx = this.initContext()
+        const decoded = await ctx.decodeAudioData(arrayBuffer)
+        if (loads === this.loadingPromises) this.bufferCache.set(filePath, decoded)
+        return decoded
+      } catch (err: any) {
+        console.error(`[AudioPlaybackEngine] Failed to decode audio file ${filePath}:`, err)
+        throw new Error(`Failed to load audio file "${filePath}": ${err?.message || String(err)}`)
+      } finally {
+        loads.delete(filePath)
+      }
+    })
+
+    this.loadingPromises.set(filePath, loadPromise)
+    return await loadPromise
   }
 
   /**
    * Preloads all region audio files for the given tracks.
+   * Deduplicates file paths and surfaces load failures.
    */
   public async preloadTracks(tracks: Track[]): Promise<void> {
-    const promises: Promise<any>[] = []
+    const pathsToLoad = new Set<string>()
     for (const track of tracks) {
       for (const region of track.regions) {
         if (region.file?.path && !this.bufferCache.has(region.file.path)) {
-          promises.push(this.loadAudioBuffer(region.file.path))
+          pathsToLoad.add(region.file.path)
         }
       }
     }
-    await Promise.all(promises)
+
+    if (pathsToLoad.size === 0) return
+
+    const loadPromises = Array.from(pathsToLoad).map((filePath) => this.loadAudioBuffer(filePath))
+    await Promise.all(loadPromises)
   }
 
   /**
@@ -216,10 +283,15 @@ export class AudioPlaybackEngine {
    * Starts playback from playheadPos or current position.
    */
   public async play(tracks: Track[], fromPos?: number): Promise<void> {
+    this.stop()
+    const request = ++this.playbackRequest
+    await this.preloadTracks(tracks)
+    if (request !== this.playbackRequest) return
     const ctx = this.initContext()
     if (ctx.state === 'suspended') {
       await ctx.resume()
     }
+    if (request !== this.playbackRequest) return
 
     // Stop any existing playing nodes
     this.stopSources()
@@ -252,9 +324,14 @@ export class AudioPlaybackEngine {
         if (regionEnd <= this.playheadPos) continue
 
         // Load buffer from cache or on demand
-        let audioBuffer = region.file?.path ? this.bufferCache.get(region.file.path) : null
+        let audioBuffer: AudioBuffer | null = region.file?.path ? (this.bufferCache.get(region.file.path) || null) : null
         if (!audioBuffer && region.file?.path) {
-          audioBuffer = await this.loadAudioBuffer(region.file.path)
+          try {
+            audioBuffer = await this.loadAudioBuffer(region.file.path)
+          } catch (err) {
+            console.warn(`[AudioPlaybackEngine] Skipping region playback, audio buffer failed to load: ${region.file?.path}`, err)
+            continue
+          }
         }
         if (!audioBuffer) {
           console.warn(`[AudioPlaybackEngine] Skipping region playback, audio buffer not available: ${region.file?.path}`)
@@ -326,6 +403,7 @@ export class AudioPlaybackEngine {
    * Pauses playback.
    */
   public pause(): void {
+    this.playbackRequest++
     if (this.currentState !== 'playing') return
     this.stopSources()
     this.currentState = 'paused'
@@ -337,6 +415,7 @@ export class AudioPlaybackEngine {
    * Stops playback and resets playhead to 0 or keeps playhead position.
    */
   public stop(resetPlayhead: boolean = false): void {
+    this.playbackRequest++
     this.stopSources()
     if (resetPlayhead) {
       this.playheadPos = 0
@@ -435,9 +514,18 @@ export class AudioPlaybackEngine {
   }
 
   /**
-   * Clear cached audio buffers to free memory.
+   * Returns the count of cached audio buffers.
+   */
+  public getCacheSize(): number {
+    return this.bufferCache.size
+  }
+
+  /**
+   * Clear cached audio buffers and pending load promises to free memory.
    */
   public clearCache(): void {
+    this.playbackRequest++
     this.bufferCache.clear()
+    this.loadingPromises = new Map()
   }
 }

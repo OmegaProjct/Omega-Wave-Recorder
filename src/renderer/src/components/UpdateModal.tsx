@@ -16,7 +16,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
   const [status, setStatus] = useState<
     'checking' | 'up-to-date' | 'available' | 'downloading' | 'ready' | 'error'
   >('checking')
-  const [currentVersion, setCurrentVersion] = useState('0.1.3')
+  const [currentVersion, setCurrentVersion] = useState('0.1.4')
   const [newVersion, setNewVersion] = useState<string | null>(null)
   const [downloadUrl, setDownloadUrl] = useState<string>('')
   const [releaseNotes, setReleaseNotes] = useState<string>('')
@@ -56,6 +56,10 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
             if (res.downloadUrl) setDownloadUrl(res.downloadUrl)
             setStatus('available')
             return
+          } else if (res?.error) {
+            setErrorMessage(res.error)
+            setStatus('error')
+            return
           }
         }
 
@@ -64,7 +68,8 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
           setStatus('up-to-date')
         }, 800)
       } catch (err: any) {
-        setStatus('up-to-date')
+        setErrorMessage(err?.message || 'Fehler beim Prüfen auf Updates.')
+        setStatus('error')
       }
     }
     check()

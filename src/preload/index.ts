@@ -27,6 +27,19 @@ export interface TranscodeOptions {
   deleteSource?: boolean
 }
 
+export interface ExportSettings {
+  format: 'wav' | 'mp3' | 'flac' | 'ogg' | 'm4a' | 'opus' | string
+  path: string
+  sampleRate: number
+  bitDepth?: string
+  bitrate?: string
+  channels: 'Stereo' | 'Mono' | string
+  playAfterExport?: boolean
+  id3Tags?: Id3Metadata
+  mode?: 'mixdown' | 'stems'
+  coverPath?: string
+}
+
 export interface UpdateDownloadProgress {
   percent: number
   status: string
@@ -76,8 +89,12 @@ const api = {
     ipcRenderer.invoke('transcode-export', tempWavPath, outputPath, options, id3Tags),
   getMediaInfo: (filePath: string) => ipcRenderer.invoke('get-media-info', filePath),
   readFileBuffer: (filePath: string) => ipcRenderer.invoke('read-file-buffer', filePath),
-  exportProject: (tracksData: any[], outputPath: string, id3Tags?: Id3Metadata) =>
-    ipcRenderer.invoke('export-project', tracksData, outputPath, id3Tags),
+  exportProject: (tracksData: any[], settingsOrPath: ExportSettings | string, id3Tags?: Id3Metadata) => {
+    const settings = typeof settingsOrPath === 'string'
+      ? { path: settingsOrPath, id3Tags: id3Tags || undefined }
+      : settingsOrPath
+    return ipcRenderer.invoke('export-project', tracksData, settings)
+  },
 
   // Loopback & Window Enumeration
   getVisibleWindows: (): Promise<VisibleAppWindow[]> => ipcRenderer.invoke('get-visible-windows'),
@@ -151,13 +168,18 @@ const api = {
   submitFeedback: (payload: any) => ipcRenderer.invoke('submit-feedback', payload),
   getAvailableLocales: () => ipcRenderer.invoke('get-available-locales'),
   openLocalesFolder: () => ipcRenderer.invoke('open-locales-folder'),
-  exportAudio: (settings: any) => ipcRenderer.invoke('export-project', [], settings.path, settings.id3Tags),
+  exportAudio: (tracksOrSettings: any[] | ExportSettings, maybeSettings?: ExportSettings) => {
+    if (Array.isArray(tracksOrSettings)) {
+      return ipcRenderer.invoke('export-project', tracksOrSettings, maybeSettings)
+    }
+    return ipcRenderer.invoke('export-project', [], tracksOrSettings)
+  },
 
   // Real-time chunk streaming & loopback capture for AudioRecordingEngine
   startLoopbackCapture: (pid: number, trackId?: string) =>
     ipcRenderer.invoke('start-loopback-capture', pid, trackId),
-  stopLoopbackCapture: (pid: number) =>
-    ipcRenderer.invoke('stop-loopback-capture', pid),
+  stopLoopbackCapture: (pid: number, trackId?: string) =>
+    ipcRenderer.invoke('stop-loopback-capture', pid, trackId),
   onLoopbackChunk: (callback: (data: any) => void) => {
     const handler = (_: any, data: any) => callback(data)
     ipcRenderer.on('loopback-chunk', handler)
@@ -165,6 +187,15 @@ const api = {
       ipcRenderer.removeListener('loopback-chunk', handler)
     }
   },
+  onLoopbackError: (callback: (data: { trackId: string; pid: number; error: string }) => void) => {
+    const handler = (_: any, data: any) => callback(data)
+    ipcRenderer.on('loopback-error', handler)
+    return () => {
+      ipcRenderer.removeListener('loopback-error', handler)
+    }
+  },
+  initRecordingWav: (trackId: string, filePath: string, sampleRate?: number, channels?: number) =>
+    ipcRenderer.invoke('init-recording-wav', trackId, filePath, sampleRate, channels),
   appendRecordingChunk: (trackId: string, filePath: string, buffer: ArrayBuffer) =>
     ipcRenderer.invoke('append-recording-chunk', trackId, filePath, buffer),
   finalizeRecordingWav: (trackId: string, filePath: string, totalSamples: number, sampleRate?: number, channels?: number) =>

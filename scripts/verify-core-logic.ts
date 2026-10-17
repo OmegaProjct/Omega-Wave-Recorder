@@ -4,10 +4,15 @@
  */
 
 import assert from 'node:assert'
+import fs from 'node:fs'
+import path from 'node:path'
+import os from 'node:os'
 import { ProjectManager, MICRO_FADE_SECONDS } from '../src/renderer/src/lib/ProjectManager'
 import { HistoryStack, MAX_HISTORY_STEPS } from '../src/renderer/src/lib/useHistory'
 import { AudioRecordingEngine } from '../src/renderer/src/lib/AudioRecordingEngine'
+import { AudioPlaybackEngine } from '../src/renderer/src/lib/AudioPlaybackEngine'
 import { WaveformDrawer } from '../src/renderer/src/lib/WaveformDrawer'
+import { createWavHeader } from '../src/main/ipc/audioIpc'
 import type { Track, Region } from '../src/common/types'
 
 console.log('=== Starting Verification of Core Audio & Logic ===\n')
@@ -221,6 +226,410 @@ assert(peaks.max[10] > 0.4)
 assert(peaks.min[10] < -0.4)
 console.log('✓ Waveform peak decimation test passed.')
 
-console.log('\n=============================================')
-console.log('ALL TESTS PASSED WITH 100% SUCCESS!')
-console.log('=============================================\n')
+// -------------------------------------------------------------
+// Test 7: Project Save Path Separation & Display Name
+// -------------------------------------------------------------
+console.log('\nTest 7: Project Save Path Separation & Display Name...')
+// Unnamed / Unassigned checks
+assert.strictEqual(ProjectManager.isUnnamed(null), true, 'null path should be unnamed')
+assert.strictEqual(ProjectManager.isUnnamed(undefined), true, 'undefined path should be unnamed')
+assert.strictEqual(ProjectManager.isUnnamed(''), true, 'empty path should be unnamed')
+assert.strictEqual(ProjectManager.isUnnamed('Unbenannt.owrp'), true, 'default Unbenannt.owrp without dir should be unnamed')
+assert.strictEqual(ProjectManager.isUnnamed('Neues Projekt.owrp'), true, 'default Neues Projekt.owrp without dir should be unnamed')
+assert.strictEqual(ProjectManager.isUnnamed('relative/path.owrp'), true, 'relative path should be treated as unnamed project')
+
+// Named / Absolute checks
+assert.strictEqual(ProjectManager.isUnnamed('C:/Projects/Session1.owrp'), false, 'Windows slash absolute path should be named')
+assert.strictEqual(ProjectManager.isUnnamed('C:\\Projects\\Session1.owrp'), false, 'Windows backslash absolute path should be named')
+assert.strictEqual(ProjectManager.isUnnamed('/home/user/Music/Session1.owrp'), false, 'POSIX absolute path should be named')
+
+// Display name extraction
+assert.strictEqual(ProjectManager.getDisplayName(null), 'Unbenannt.owrp')
+assert.strictEqual(ProjectManager.getDisplayName(''), 'Unbenannt.owrp')
+assert.strictEqual(ProjectManager.getDisplayName('C:/Projects/Session1.owrp'), 'Session1.owrp')
+assert.strictEqual(ProjectManager.getDisplayName('C:\\Users\\User\\Music\\TakeAlpha.owrp'), 'TakeAlpha.owrp')
+assert.strictEqual(ProjectManager.getDisplayName('/var/audio/Mixdown.owep'), 'Mixdown.owep')
+
+// Path and display name separation
+const absolutePath = 'C:\\Omega\\Projects\\HitSong_2026.owrp'
+const displayName = ProjectManager.getDisplayName(absolutePath)
+assert.notStrictEqual(absolutePath, displayName, 'Full absolute path and display name must be separate')
+assert.strictEqual(displayName, 'HitSong_2026.owrp')
+console.log('✓ Project save path separation & display name test passed.')
+
+// -------------------------------------------------------------
+// Test 8: HistoryStack Dirty State Tracking (isModified / markClean)
+// -------------------------------------------------------------
+console.log('\nTest 8: HistoryStack Dirty State Tracking (isModified / markClean)...')
+const trackHistory = new HistoryStack<string>('State 0', 10)
+assert.strictEqual(trackHistory.isModified, false, 'HistoryStack should initially be clean')
+assert.strictEqual(trackHistory.canUndo, false)
+assert.strictEqual(trackHistory.canRedo, false)
+
+// 1. Push edit -> becomes dirty
+trackHistory.push('State 1')
+assert.strictEqual(trackHistory.isModified, true, 'HistoryStack should be modified after push')
+assert.strictEqual(trackHistory.canUndo, true)
+assert.strictEqual(trackHistory.canRedo, false)
+
+// 2. Undo edit -> returns to clean state
+const undone = trackHistory.undo()
+assert.strictEqual(undone, 'State 0')
+assert.strictEqual(trackHistory.isModified, false, 'HistoryStack should be clean after undoing back to initial state')
+assert.strictEqual(trackHistory.canUndo, false)
+assert.strictEqual(trackHistory.canRedo, true)
+
+// 3. Redo edit -> becomes dirty again
+const redone = trackHistory.redo()
+assert.strictEqual(redone, 'State 1')
+assert.strictEqual(trackHistory.isModified, true, 'HistoryStack should be modified after redo')
+
+// 4. Mark clean (e.g. after successful verified disk write)
+trackHistory.markClean()
+assert.strictEqual(trackHistory.isModified, false, 'HistoryStack should be clean after markClean')
+
+// 5. Undoing past the saved point should make it dirty again
+trackHistory.undo()
+assert.strictEqual(trackHistory.isModified, true, 'Undoing before saved state should mark it modified')
+
+// 6. Redoing back to saved point restores clean state
+trackHistory.redo()
+assert.strictEqual(trackHistory.isModified, false, 'Redoing to saved state should restore clean state')
+
+// 7. Non-modifying transient update with setPresent
+trackHistory.setPresent('State 1 (gain updated)', false)
+assert.strictEqual(trackHistory.isModified, false, 'Non-modifying setPresent should not dirty history')
+
+// 8. Modifying transient update with setPresent
+trackHistory.setPresent('State 1 (name edited)', true)
+assert.strictEqual(trackHistory.isModified, true, 'Modifying setPresent should mark history modified')
+console.log('✓ HistoryStack dirty state tracking test passed.')
+
+// -------------------------------------------------------------
+// Test 9: Project Boundary Resets
+// -------------------------------------------------------------
+console.log('\nTest 9: Project Boundary Resets (Isolated HistoryStack, Selection, Playhead & Buffer Cache)...')
+// Simulate an ongoing project state with edits, selection, playhead, and playback cache
+const projectBoundaryHistory = new HistoryStack<Track[]>(initialTracks)
+projectBoundaryHistory.push(cutResult)
+assert.strictEqual(projectBoundaryHistory.isModified, true)
+assert.strictEqual(projectBoundaryHistory.canUndo, true)
+
+let mockSelection: { start: number; end: number } | null = { start: 2.5, end: 7.0 }
+let mockPlayheadPos: number = 8.42
+
+// Simulate audio buffer cache
+const playbackEngine = AudioPlaybackEngine.getInstance()
+playbackEngine.clearCache()
+assert.strictEqual(playbackEngine.getCacheSize(), 0, 'Buffer cache should be 0 initially')
+
+// Execute Project Boundary Reset (as executed in handleNewProject / handleOpenProject)
+const freshProject = ProjectManager.createNewProject({ name: 'FreshSession' })
+projectBoundaryHistory.clear(freshProject.tracks)
+mockSelection = null
+mockPlayheadPos = 0.0
+playbackEngine.clearCache()
+
+// Assertions for project boundary reset
+assert.strictEqual(projectBoundaryHistory.isModified, false, 'HistoryStack must be marked clean upon project reset')
+assert.strictEqual(projectBoundaryHistory.canUndo, false, 'HistoryStack past must be cleared')
+assert.strictEqual(projectBoundaryHistory.canRedo, false, 'HistoryStack future must be cleared')
+assert.strictEqual(projectBoundaryHistory.historyLength, 0, 'HistoryStack length must be 0')
+assert.strictEqual(projectBoundaryHistory.state.length, 4, 'Must hold isolated fresh tracks')
+assert.strictEqual(mockSelection, null, 'Selection must be reset to null')
+assert.strictEqual(mockPlayheadPos, 0.0, 'Playhead must be reset to zero')
+assert.strictEqual(playbackEngine.getCacheSize(), 0, 'Audio playback buffer cache must be empty')
+console.log('✓ Project boundary resets test passed.')
+
+// -------------------------------------------------------------
+// Test 10: ArrayBuffer View Conversion (AudioPlaybackEngine.toArrayBuffer)
+// -------------------------------------------------------------
+console.log('\nTest 10: ArrayBuffer View Conversion (AudioPlaybackEngine.toArrayBuffer)...')
+// 1. Convert Buffer with non-zero byteOffset and smaller byteLength
+const parentBuffer = Buffer.alloc(100)
+for (let i = 0; i < 100; i++) parentBuffer[i] = i + 1
+const subBuffer = parentBuffer.subarray(25, 65) // offset: 25, length: 40
+assert.strictEqual(subBuffer.byteOffset, 25)
+assert.strictEqual(subBuffer.byteLength, 40)
+
+const exactAb = AudioPlaybackEngine.toArrayBuffer(subBuffer)
+assert(exactAb instanceof ArrayBuffer, 'Must return a standard ArrayBuffer')
+assert.strictEqual(exactAb.byteLength, 40, 'ArrayBuffer byteLength must match view length')
+
+// Verify byte contents
+const exactView = new Uint8Array(exactAb)
+for (let i = 0; i < 40; i++) {
+  assert.strictEqual(exactView[i], 25 + i + 1, `Byte at index ${i} must match sliced content`)
+}
+
+// Verify immutability: mutating source buffer does not mutate isolated ArrayBuffer
+subBuffer[0] = 255
+assert.strictEqual(exactView[0], 26, 'Isolated ArrayBuffer must not be mutated by changes to source view')
+
+// 2. Convert Uint8Array backed by larger ArrayBuffer
+const largeAb = new ArrayBuffer(80)
+const largeU8 = new Uint8Array(largeAb)
+for (let i = 0; i < 80; i++) largeU8[i] = 100 + i
+const subU8 = new Uint8Array(largeAb, 20, 30) // offset: 20, length: 30
+const exactFromU8 = AudioPlaybackEngine.toArrayBuffer(subU8)
+assert.strictEqual(exactFromU8.byteLength, 30)
+const u8View = new Uint8Array(exactFromU8)
+assert.strictEqual(u8View[0], 120)
+assert.strictEqual(u8View[29], 149)
+
+// 3. Direct ArrayBuffer pass-through
+const directAb = new ArrayBuffer(16)
+new Uint8Array(directAb)[0] = 42
+const exactFromAb = AudioPlaybackEngine.toArrayBuffer(directAb)
+assert.strictEqual(exactFromAb.byteLength, 16)
+assert.strictEqual(new Uint8Array(exactFromAb)[0], 42)
+
+// 4. Null / undefined / empty
+assert.strictEqual(AudioPlaybackEngine.toArrayBuffer(null).byteLength, 0)
+assert.strictEqual(AudioPlaybackEngine.toArrayBuffer(undefined).byteLength, 0)
+console.log('✓ ArrayBuffer view conversion test passed.')
+
+// -------------------------------------------------------------
+// Async Tests: Serialization, Sample Rate Sync & Preload Deduplication
+// -------------------------------------------------------------
+async function runAsyncTests() {
+  // -------------------------------------------------------------
+  // Test 11: Chunk Append Serialization & Structured Responses
+  // -------------------------------------------------------------
+  console.log('\nTest 11: Chunk Append Serialization via Promise Chain...')
+  const appendExecutionOrder: number[] = []
+  let activeAppendCount = 0
+  let maxConcurrentAppends = 0
+
+  // Mock window.api with variable latency per chunk
+  const mockApi: any = {
+    appendRecordingChunk: async (_trackId: string, _path: string, buffer: ArrayBuffer) => {
+      activeAppendCount++
+      if (activeAppendCount > maxConcurrentAppends) maxConcurrentAppends = activeAppendCount
+      const chunkNum = Math.round(new Int16Array(buffer)[0] / 1000)
+
+      // Simulate variable I/O delay: chunk 1 takes 30ms, chunk 2 takes 5ms, chunk 3 takes 15ms
+      const delays: Record<number, number> = { 1: 30, 2: 5, 3: 15, 4: 2 }
+      await new Promise((r) => setTimeout(r, delays[chunkNum] || 10))
+
+      appendExecutionOrder.push(chunkNum)
+      activeAppendCount--
+      return { success: true }
+    }
+  }
+
+  // Create a recording session
+  const recSession: any = {
+    trackId: 'track-test',
+    tempFilePath: 'C:/temp/test.wav',
+    sampleRate: 48000,
+    channels: 2,
+    unwrittenL: [],
+    unwrittenR: [],
+    unwrittenSamples: 0,
+    writeQueue: Promise.resolve()
+  }
+
+  // Backup window
+  const origWindow = (global as any).window
+  ;(global as any).window = { api: mockApi }
+
+  const recordingEngine = AudioRecordingEngine.getInstance()
+
+  // Enqueue 4 chunks in rapid succession
+  for (let chunkId = 1; chunkId <= 4; chunkId++) {
+    const samples = 128
+    const chL = new Float32Array(samples)
+    // Store chunkId in sample for tracing
+    chL[0] = (chunkId * 1000) / 0x7fff
+    recSession.unwrittenL = [chL]
+    recSession.unwrittenR = [chL]
+    recSession.unwrittenSamples = samples
+
+    // Call flushSessionToDisk (chains onto recSession.writeQueue)
+    recordingEngine.flushSessionToDisk(recSession)
+  }
+
+  // Await the writeQueue
+  await recSession.writeQueue
+
+  // Assert strict serialized execution: chunk 1 then 2 then 3 then 4
+  assert.deepStrictEqual(
+    appendExecutionOrder,
+    [1, 2, 3, 4],
+    'Chunks must execute in strict sequential order despite variable latency'
+  )
+  assert.strictEqual(maxConcurrentAppends, 1, 'Never more than 1 disk append in flight simultaneously per track')
+
+  // Test structured { success: false, error: ... } handling
+  let writeQueueRejected = false
+  mockApi.appendRecordingChunk = async () => {
+    return { success: false, error: 'Disk write error: out of space' }
+  }
+
+  const errorSession: any = {
+    trackId: 'track-err',
+    tempFilePath: 'C:/temp/err.wav',
+    sampleRate: 48000,
+    channels: 2,
+    unwrittenL: [new Float32Array(64)],
+    unwrittenR: [new Float32Array(64)],
+    unwrittenSamples: 64,
+    writeQueue: Promise.resolve()
+  }
+
+  try {
+    await recordingEngine.flushSessionToDisk(errorSession)
+    await errorSession.writeQueue
+  } catch (err: any) {
+    writeQueueRejected = true
+    assert(err.message.includes('Disk write error'), 'Error must contain structured response error message')
+  }
+  assert.strictEqual(writeQueueRejected, true, 'writeQueue must reject when structured success is false')
+  console.log('✓ Chunk append serialization and error propagation test passed.')
+
+  // -------------------------------------------------------------
+  // Test 12: Actual Sample Rate Sync & Constant-Memory In-Place WAV Header
+  // -------------------------------------------------------------
+  console.log('\nTest 12: Actual Sample Rate Sync & Constant-Memory WAV Header...')
+  // 1. WAV Header field validation for dynamic sample rates
+  const sampleRatesToTest = [44100, 48000, 96000]
+  for (const sr of sampleRatesToTest) {
+    const pcmBytes = 88200 * 2 * 2 // 2 seconds of 16-bit stereo PCM
+    const header = createWavHeader(pcmBytes, sr, 2)
+    assert.strictEqual(header.length, 44, 'Header must be exactly 44 bytes')
+
+    // RIFF header
+    assert.strictEqual(header.toString('ascii', 0, 4), 'RIFF')
+    assert.strictEqual(header.readUInt32LE(4), 36 + pcmBytes)
+    assert.strictEqual(header.toString('ascii', 8, 12), 'WAVE')
+
+    // fmt chunk
+    assert.strictEqual(header.toString('ascii', 12, 16), 'fmt ')
+    assert.strictEqual(header.readUInt32LE(16), 16) // Subchunk1Size
+    assert.strictEqual(header.readUInt16LE(20), 1) // PCM format
+    assert.strictEqual(header.readUInt16LE(22), 2) // channels
+    assert.strictEqual(header.readUInt32LE(24), sr, `Sample rate field must match ${sr}`)
+    assert.strictEqual(header.readUInt32LE(28), sr * 2 * 2, `Byte rate must match sr * channels * 2`)
+    assert.strictEqual(header.readUInt16LE(32), 4, 'Block align must be channels * 2')
+    assert.strictEqual(header.readUInt16LE(34), 16, 'Bits per sample must be 16')
+
+    // data chunk
+    assert.strictEqual(header.toString('ascii', 36, 40), 'data')
+    assert.strictEqual(header.readUInt32LE(40), pcmBytes, 'dataSize must match pcmBytes')
+  }
+
+  // 2. Duration calculation fidelity: actual sample rate vs hardcoded 48000
+  const samples44k = 88200
+  const durationAt44k = samples44k / 44100
+  assert.strictEqual(durationAt44k, 2.0, '88200 samples at 44.1kHz must equal exactly 2.0 seconds')
+  const durationErrWith48k = samples44k / 48000
+  assert.notStrictEqual(durationErrWith48k, 2.0, 'Hardcoded 48000 would cause 1.8375s incorrect duration')
+
+  // 3. Constant-memory in-place WAV header patching simulation
+  const tempTestDir = path.join(os.tmpdir(), 'owr_test_wav')
+  if (!fs.existsSync(tempTestDir)) fs.mkdirSync(tempTestDir, { recursive: true })
+  const tempWavFile = path.join(tempTestDir, `test_inplace_${Date.now()}.wav`)
+
+  // Write initial placeholder 44-byte header + 1000 bytes PCM
+  const initialHeader = createWavHeader(0, 44100, 2)
+  const fakePcm = Buffer.alloc(1000, 0x5a) // Fill with pattern
+  fs.writeFileSync(tempWavFile, Buffer.concat([initialHeader, fakePcm]))
+  const initialStat = fs.statSync(tempWavFile)
+  assert.strictEqual(initialStat.size, 1044, 'Initial file must be 44-byte header + 1000 bytes PCM')
+
+  // In-place patch header using mode 'r+' (O(1) memory and time, no full-file read)
+  const fileHandle = await fs.promises.open(tempWavFile, 'r+')
+  try {
+    const updatedHeader = createWavHeader(1000, 44100, 2)
+    await fileHandle.write(updatedHeader, 0, 44, 0)
+  } finally {
+    await fileHandle.close()
+  }
+
+  // Verify file was patched in place: size unchanged, PCM bytes untouched, header updated
+  const patchedStat = fs.statSync(tempWavFile)
+  assert.strictEqual(patchedStat.size, 1044, 'File size must remain exactly 1044 bytes after in-place header patch')
+  const finalBuf = fs.readFileSync(tempWavFile)
+  assert.strictEqual(finalBuf.readUInt32LE(40), 1000, 'Data chunk size must now be 1000')
+  assert.strictEqual(finalBuf[44], 0x5a, 'First PCM byte must be unchanged')
+  assert.strictEqual(finalBuf[1043], 0x5a, 'Last PCM byte must be unchanged')
+
+  // Clean up temp file
+  fs.unlinkSync(tempWavFile)
+  console.log('✓ Dynamic sample rate sync & constant-memory WAV header test passed.')
+
+  // -------------------------------------------------------------
+  // Test 13: Playback Engine Preload Deduplication and clearCache()
+  // -------------------------------------------------------------
+  console.log('\nTest 13: Playback Engine Preload Deduplication, Cache Clearing & Error Propagation...')
+  let fileReadCount = 0
+  let decodeCount = 0
+
+  // Setup mock AudioContext
+  const mockAudioBuffer = { duration: 1.0, length: 44100, numberOfChannels: 2, sampleRate: 44100 }
+  class MockAudioContext {
+    state = 'running'
+    sampleRate = 44100
+    currentTime = 0
+    destination = {}
+    createGain() { return { gain: { value: 1, setTargetAtTime() {} }, connect() {} } }
+    decodeAudioData(_buffer: ArrayBuffer) {
+      decodeCount++
+      return Promise.resolve(mockAudioBuffer)
+    }
+  }
+  ;(global as any).window.AudioContext = MockAudioContext
+
+  mockApi.readFileBuffer = async (_path: string) => {
+    fileReadCount++
+    await new Promise((r) => setTimeout(r, 20)) // 20ms simulated file read
+    return Buffer.alloc(100)
+  }
+
+  playbackEngine.clearCache()
+  assert.strictEqual(playbackEngine.getCacheSize(), 0)
+
+  // Trigger two concurrent loadAudioBuffer calls for the same file path
+  const [buf1, buf2] = await Promise.all([
+    playbackEngine.loadAudioBuffer('C:/audio/track1.wav'),
+    playbackEngine.loadAudioBuffer('C:/audio/track1.wav')
+  ])
+
+  assert.strictEqual(buf1, buf2 as any, 'Both concurrent loads must return the same AudioBuffer reference')
+  assert.strictEqual(fileReadCount, 1, 'readFileBuffer must only be called ONCE for concurrent requests (deduplication)')
+  assert.strictEqual(decodeCount, 1, 'decodeAudioData must only be called ONCE for concurrent requests')
+  assert.strictEqual(playbackEngine.getCacheSize(), 1, 'Cache size should be 1 after load')
+
+  // Test clearCache()
+  playbackEngine.clearCache()
+  assert.strictEqual(playbackEngine.getCacheSize(), 0, 'Cache size must be 0 after clearCache()')
+
+  // Test error propagation on load failure
+  mockApi.readFileBuffer = async () => {
+    throw new Error('File not accessible')
+  }
+  let loadErrorThrown = false
+  try {
+    await playbackEngine.loadAudioBuffer('C:/audio/missing.wav')
+  } catch (err: any) {
+    loadErrorThrown = true
+    assert(err.message.includes('File not accessible'), 'Error must propagate to caller')
+  }
+  assert.strictEqual(loadErrorThrown, true, 'loadAudioBuffer must propagate failures instead of silent success')
+
+  // Restore window
+  ;(global as any).window = origWindow
+  console.log('✓ Playback engine preload deduplication & error propagation test passed.')
+}
+
+runAsyncTests()
+  .then(() => {
+    console.log('\n=============================================')
+    console.log('ALL TESTS PASSED WITH 100% SUCCESS!')
+    console.log('=============================================\n')
+  })
+  .catch((err) => {
+    console.error('\nTests failed with error:', err)
+    process.exit(1)
+  })

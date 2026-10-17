@@ -2,6 +2,22 @@
 
 The format is based on Keep a Changelog. Dieses Projekt nutzt das klassische Semantic Versioning (`X.Y.Z`).
 
+## [0.1.4] - 2026-10-18
+
+### Deutsch
+
+#### 🐛 Behoben & Verbessert
+- **Öffentlicher Update-Kanal**: Das Repository ist nun öffentlich geschaltet. Der integrierte Updater kann neueste Releases und Installationspakete nun ohne Authentifizierungsschranken direkt von der GitHub API abrufen.
+- **Cache-freie Update-Prüfung**: `check-for-updates` erzwingt nun `no-cache`, um veraltete 304-Zustände zu verhindern.
+- **Transparente Fehlerausgabe**: Eventuelle Netzwerk- oder API-Fehler bei der Update-Suche werden nun im Dialog klar angezeigt, anstatt fälschlicherweise „Sie verwenden die neueste Version“ anzuzeigen.
+
+### English
+
+#### 🐛 Fixed & Improved
+- **Public Update Channel**: The repository is now publicly accessible. The internal updater fetches latest releases and setup assets without authentication barriers.
+- **Cache-Free Update Check**: Added `no-cache` and `no-store` headers to ensure up-to-the-minute release detection.
+- **Transparent Error Handling**: Network or API errors during update checks are now clearly shown in the dialog instead of masked as up-to-date.
+
 ## [0.1.3] - 2026-10-18
 
 ### Deutsch

@@ -22,7 +22,7 @@ export function resolveAudioPath(filePath: string): string {
 let ffmpegPath: string | null = (ffmpegStatic as unknown as string) || null
 let ffprobePath: string = (ffprobeStatic && (ffprobeStatic as any).path) ? (ffprobeStatic as any).path : ''
 
-if (app.isPackaged) {
+if (app && app.isPackaged) {
   if (ffmpegPath) {
     ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked')
   }
@@ -63,6 +63,31 @@ export interface TranscodeOptions {
   deleteSource?: boolean
 }
 
+/**
+ * Creates standard 44-byte WAV header buffer
+ */
+export function createWavHeader(dataSize: number, sampleRate: number = 48000, channels: number = 2): Buffer {
+  const header = Buffer.alloc(44)
+  const byteRate = sampleRate * channels * 2
+  const blockAlign = channels * 2
+
+  header.write('RIFF', 0)
+  header.writeUInt32LE(36 + dataSize, 4)
+  header.write('WAVE', 8)
+  header.write('fmt ', 12)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(channels, 22)
+  header.writeUInt32LE(sampleRate, 24)
+  header.writeUInt32LE(byteRate, 28)
+  header.writeUInt16LE(blockAlign, 32)
+  header.writeUInt16LE(16, 34)
+  header.write('data', 36)
+  header.writeUInt32LE(dataSize, 40)
+
+  return header
+}
+
 export function registerAudioIpc(): void {
   // Save recording buffer safely to disk
   ipcMain.handle('save-recording', async (_, outputPath: string, arrayBuffer: ArrayBuffer | Buffer) => {
@@ -85,6 +110,27 @@ export function registerAudioIpc(): void {
     }
   })
 
+  // Initialize recording file by reserving standard 44-byte WAV header on disk
+  ipcMain.handle('init-recording-wav', async (_, trackId: string, filePath: string, sampleRate: number = 48000, channels: number = 2) => {
+    const resolvedPath = resolveAudioPath(filePath)
+    if (!isSafePath(resolvedPath)) {
+      return { success: false, error: 'Ungültiger Pfad' }
+    }
+    try {
+      const dir = path.dirname(resolvedPath)
+      await fs.promises.mkdir(dir, { recursive: true })
+      const actualSampleRate = typeof sampleRate === 'number' && sampleRate > 0 ? sampleRate : 48000
+      const actualChannels = typeof channels === 'number' && channels > 0 ? channels : 2
+      const header = createWavHeader(0, actualSampleRate, actualChannels)
+      await fs.promises.writeFile(resolvedPath, header)
+      logger.info('Audio', 'WAV-Datei initialisiert mit 44-Byte Header', { trackId, resolvedPath, actualSampleRate, actualChannels })
+      return { success: true, filePath: resolvedPath }
+    } catch (err: any) {
+      logger.error('Audio', 'Fehler beim Initialisieren der WAV-Datei', { trackId, filePath, resolvedPath, error: err.message })
+      return { success: false, error: err.message }
+    }
+  })
+
   // Append raw PCM chunk to ongoing recording file on disk
   ipcMain.handle('append-recording-chunk', async (_, trackId: string, filePath: string, buffer: ArrayBuffer) => {
     const resolvedPath = resolveAudioPath(filePath)
@@ -94,7 +140,17 @@ export function registerAudioIpc(): void {
     try {
       const dir = path.dirname(resolvedPath)
       await fs.promises.mkdir(dir, { recursive: true })
-      await fs.promises.appendFile(resolvedPath, Buffer.from(buffer))
+      if (!fs.existsSync(resolvedPath)) {
+        // Reserve 44-byte WAV header on creation if not already initialized
+        const header = createWavHeader(0, 48000, 2)
+        await fs.promises.writeFile(resolvedPath, header)
+      }
+      const chunkBuf = Buffer.isBuffer(buffer)
+        ? buffer
+        : ArrayBuffer.isView(buffer)
+          ? Buffer.from((buffer as any).buffer, (buffer as any).byteOffset, (buffer as any).byteLength)
+          : Buffer.from(buffer)
+      await fs.promises.appendFile(resolvedPath, chunkBuf)
       return { success: true }
     } catch (err: any) {
       logger.error('Audio', 'Fehler beim Anhängen des Audio-Chunks', { trackId, filePath, resolvedPath, error: err.message })
@@ -102,7 +158,7 @@ export function registerAudioIpc(): void {
     }
   })
 
-  // Finalize recorded PCM file by writing standard 44-byte WAV header
+  // Finalize recorded PCM file by writing standard 44-byte WAV header in O(1) constant memory
   ipcMain.handle('finalize-recording-wav', async (_, trackId: string, filePath: string, totalSamples: number, sampleRate: number = 48000, channels: number = 2) => {
     const resolvedPath = resolveAudioPath(filePath)
     if (!isSafePath(resolvedPath)) {
@@ -113,29 +169,74 @@ export function registerAudioIpc(): void {
         return { success: false, error: 'Aufnahmedatei existiert nicht' }
       }
 
-      const pcmData = await fs.promises.readFile(resolvedPath)
-      const dataSize = pcmData.length
-      const header = Buffer.alloc(44)
-      const byteRate = sampleRate * channels * 2
-      const blockAlign = channels * 2
+      const stat = await fs.promises.stat(resolvedPath)
+      const actualSampleRate = typeof sampleRate === 'number' && sampleRate > 0 ? sampleRate : 48000
+      const actualChannels = typeof channels === 'number' && channels > 0 ? channels : 2
 
-      header.write('RIFF', 0)
-      header.writeUInt32LE(36 + dataSize, 4)
-      header.write('WAVE', 8)
-      header.write('fmt ', 12)
-      header.writeUInt32LE(16, 16)
-      header.writeUInt16LE(1, 20)
-      header.writeUInt16LE(channels, 22)
-      header.writeUInt32LE(sampleRate, 24)
-      header.writeUInt32LE(byteRate, 28)
-      header.writeUInt16LE(blockAlign, 32)
-      header.writeUInt16LE(16, 34)
-      header.write('data', 36)
-      header.writeUInt32LE(dataSize, 40)
+      let hasRiffHeader = false
+      if (stat.size >= 4) {
+        const fd = await fs.promises.open(resolvedPath, 'r')
+        try {
+          const magic = Buffer.alloc(4)
+          await fd.read(magic, 0, 4, 0)
+          hasRiffHeader = magic.toString('ascii') === 'RIFF'
+        } finally {
+          await fd.close()
+        }
+      }
 
-      await fs.promises.writeFile(resolvedPath, Buffer.concat([header, pcmData]))
-      logger.info('Audio', `WAV-Datei erfolgreich finalisiert`, { trackId, resolvedPath, dataSize, totalSamples })
-      return { success: true, filePath: resolvedPath }
+      if (hasRiffHeader) {
+        // 44-byte WAV header was reserved at offset 0: patch in-place with O(1) constant memory
+        const dataSize = Math.max(0, stat.size - 44)
+        const header = createWavHeader(dataSize, actualSampleRate, actualChannels)
+        const fd = await fs.promises.open(resolvedPath, 'r+')
+        try {
+          await fd.write(header, 0, 44, 0)
+        } finally {
+          await fd.close()
+        }
+        logger.info('Audio', 'WAV-Datei erfolgreich in-place finalisiert (O(1) Speicher)', {
+          trackId,
+          resolvedPath,
+          dataSize,
+          actualSampleRate,
+          actualChannels,
+          totalSamples
+        })
+        return { success: true, filePath: resolvedPath }
+      } else {
+        // File contains raw PCM without reserved header: stream into temp file with header prepended in O(1) bounded memory
+        const dataSize = stat.size
+        const header = createWavHeader(dataSize, actualSampleRate, actualChannels)
+        const tempFinalPath = `${resolvedPath}.finalizing.tmp`
+
+        await new Promise<void>((resolve, reject) => {
+          const readStream = fs.createReadStream(resolvedPath)
+          const writeStream = fs.createWriteStream(tempFinalPath)
+          writeStream.write(header, (err) => {
+            if (err) {
+              readStream.destroy(err)
+              return reject(err)
+            }
+            readStream.pipe(writeStream)
+          })
+          writeStream.on('finish', () => resolve())
+          writeStream.on('error', (err) => reject(err))
+          readStream.on('error', (err) => reject(err))
+        })
+
+        await fs.promises.unlink(resolvedPath).catch(() => {})
+        await fs.promises.rename(tempFinalPath, resolvedPath)
+        logger.info('Audio', 'WAV-Datei erfolgreich per Streaming finalisiert (O(1) Speicher)', {
+          trackId,
+          resolvedPath,
+          dataSize,
+          actualSampleRate,
+          actualChannels,
+          totalSamples
+        })
+        return { success: true, filePath: resolvedPath }
+      }
     } catch (err: any) {
       logger.error('Audio', 'Fehler beim Finalisieren der WAV-Datei', { trackId, filePath, resolvedPath, error: err.message })
       return { success: false, error: err.message }

@@ -44,7 +44,7 @@ Get the latest stable release of **Omega Wave Recorder** directly from our [Rele
 
 | Operating System | Recommended Installer | Standalone / Portable |
 | :--- | :--- | :--- |
-| **🪟 Windows 10 / 11** (x64) | [**Download Setup (.exe)**](https://github.com/OmegaProjct/Omega-Wave-Recorder/releases/latest/download/Omega-Wave-Recorder-Setup-0.1.3.exe) | [**Download Portable (.exe)**](https://github.com/OmegaProjct/Omega-Wave-Recorder/releases/latest/download/Omega-Wave-Recorder-Portable-0.1.3.exe) |
+| **🪟 Windows 10 / 11** (x64) | [**Download Setup (.exe)**](https://github.com/OmegaProjct/Omega-Wave-Recorder/releases/latest/download/Omega-Wave-Recorder-Setup-0.1.4.exe) | [**Download Portable (.exe)**](https://github.com/OmegaProjct/Omega-Wave-Recorder/releases/latest/download/Omega-Wave-Recorder-Portable-0.1.4.exe) |
 
 ---
 
@@ -124,6 +124,9 @@ Projects saved in Omega Wave Recorder (`.owrp`) share the **exact same JSON proj
 ### Prerequisites
 - **Node.js** (v20 or higher recommended)
 - **npm** (v10 or higher)
+- **Visual Studio C++ Build Tools and Windows SDK** to build the native audio helper. Installed applications do not need these tools.
+
+Isolated application recording requires Windows build **20348 or later** (including Windows 11). Windows 10 build 19045 supports hardware recording, but cannot use this process-loopback API; the app reports this limitation instead of starting an empty recording.
 
 ### Setup & Commands
 ```bash
@@ -213,6 +216,8 @@ Projektdateien (`.owrp`) verwenden exakt dasselbe Datenmodell wie der **Omega Wa
 
 <a name="de-entwicklung"></a>
 ## 💻 Entwicklung & Setup
+
+Zum Bauen werden zusätzlich die **Visual Studio C++ Build Tools und das Windows SDK** benötigt. Bei der installierten Anwendung sind diese Werkzeuge nicht erforderlich. Isolierte Programmaufnahme benötigt Windows-Build **20348 oder neuer** (einschließlich Windows 11); unter Windows 10 Build 19045 ist weiterhin die Hardwareaufnahme verfügbar.
 
 ```bash
 # Repository klonen

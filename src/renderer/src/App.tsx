@@ -25,12 +25,10 @@ import type {
   Project,
   ExportSettings
 } from '../../common/types'
-import {
-  AudioRecordingEngine,
-  type RecordingTrackConfig,
-  type RecordingResult
-} from './lib/AudioRecordingEngine'
+import { AudioRecordingEngine, type RecordingTrackConfig, type RecordingResult } from './lib/AudioRecordingEngine'
 import { AudioPlaybackEngine } from './lib/AudioPlaybackEngine'
+import { ProjectManager } from './lib/ProjectManager'
+import { useHistory } from './lib/useHistory'
 
 const INITIAL_TRACKS: Track[] = [
   {
@@ -115,11 +113,24 @@ export const App: React.FC = () => {
   // --- Workspace & View State ---
   const [viewMode, setViewMode] = useState<'multitrack' | 'focus'>('multitrack')
   const [activeTrackIndex, setActiveTrackIndex] = useState<number>(0)
+  const [projectFilePath, setProjectFilePath] = useState<string | null>(null)
   const [projectName, setProjectName] = useState<string>('Unbenannt.owrp')
-  const [isModified, setIsModified] = useState<boolean>(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
-  // --- Multi-Track State ---
-  const [tracks, setTracks] = useState<Track[]>(INITIAL_TRACKS)
+  // --- Multi-Track State with HistoryStack ---
+  const {
+    state: tracks,
+    set: pushTracks,
+    setPresent: setTracksPresent,
+    undo: historyUndo,
+    redo: historyRedo,
+    canUndo,
+    canRedo,
+    clear: clearHistory,
+    markClean: historyMarkClean,
+    isModified
+  } = useHistory<Track[]>(INITIAL_TRACKS, { enableShortcuts: false })
+
   const [armedTrackIds, setArmedTrackIds] = useState<Set<string>>(new Set(['track-1']))
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null)
 
@@ -142,15 +153,7 @@ export const App: React.FC = () => {
     'track-4': { peakL: 0, peakR: 0, peakLdBFS: -60, peakRdBFS: -60 }
   })
   const [audioDevices, setAudioDevices] = useState<{ deviceId: string; label: string }[]>([])
-  const [runningProcesses, setRunningProcesses] = useState<AudioProcessInfo[]>([
-    { pid: 1248, processName: 'Spotify.exe', title: 'Spotify Premium' },
-    { pid: 4892, processName: 'Discord.exe', title: 'Discord #General' },
-    { pid: 8120, processName: 'chrome.exe', title: 'YouTube' }
-  ])
-
-  // --- History Stack (Undo / Redo) ---
-  const [historyStack, setHistoryStack] = useState<Track[][]>([INITIAL_TRACKS])
-  const [historyIndex, setHistoryIndex] = useState<number>(0)
+  const [runningProcesses, setRunningProcesses] = useState<AudioProcessInfo[]>([])
 
   // --- Modals State ---
   const [activeModal, setActiveModal] = useState<
@@ -166,35 +169,30 @@ export const App: React.FC = () => {
   // Push Snapshot to History Stack
   const pushHistory = useCallback(
     (newTracks: Track[]) => {
-      setHistoryStack((prev) => {
-        const next = prev.slice(0, historyIndex + 1)
-        next.push(JSON.parse(JSON.stringify(newTracks)))
-        if (next.length > 50) next.shift() // Limit to 50 steps
-        return next
-      })
-      setHistoryIndex((prev) => Math.min(prev + 1, 49))
-      setIsModified(true)
+      pushTracks(newTracks)
     },
-    [historyIndex]
+    [pushTracks]
   )
 
   // Undo Action
   const handleUndo = useCallback(() => {
-    if (historyIndex > 0) {
-      const prevTracks = historyStack[historyIndex - 1]
-      setTracks(JSON.parse(JSON.stringify(prevTracks)))
-      setHistoryIndex((idx) => idx - 1)
+    if (canUndo) {
+      const restored = historyUndo()
+      if (restored) {
+        AudioPlaybackEngine.getInstance().updateRouting(restored)
+      }
     }
-  }, [historyIndex, historyStack])
+  }, [canUndo, historyUndo])
 
   // Redo Action
   const handleRedo = useCallback(() => {
-    if (historyIndex < historyStack.length - 1) {
-      const nextTracks = historyStack[historyIndex + 1]
-      setTracks(JSON.parse(JSON.stringify(nextTracks)))
-      setHistoryIndex((idx) => idx + 1)
+    if (canRedo) {
+      const restored = historyRedo()
+      if (restored) {
+        AudioPlaybackEngine.getInstance().updateRouting(restored)
+      }
     }
-  }, [historyIndex, historyStack])
+  }, [canRedo, historyRedo])
 
   // Enumerate input devices & running processes on mount
   useEffect(() => {
@@ -217,7 +215,7 @@ export const App: React.FC = () => {
       try {
         if (window.api?.getAudioProcesses) {
           const procs = await window.api.getAudioProcesses()
-          if (procs && procs.length > 0) setRunningProcesses(procs)
+          if (procs) setRunningProcesses(procs)
         }
       } catch (e) {
         console.warn('Error fetching audio processes:', e)
@@ -253,6 +251,10 @@ export const App: React.FC = () => {
       unsubState()
     }
   }, [])
+
+  useEffect(() => AudioRecordingEngine.getInstance().onError(error => {
+    setSaveError(`Aufnahme angehalten: ${error.message}. Bitte die Aufnahme stoppen.`)
+  }), [])
 
   // Animation frame loop for active recording metrics (live time, VU meters, live waveform peaks)
   const animFrameRef = useRef<number>()
@@ -310,9 +312,10 @@ export const App: React.FC = () => {
     }
     try {
       await AudioPlaybackEngine.getInstance().play(tracks, playFrom)
-      setIsPlaying(true)
+      setIsPlaying(AudioPlaybackEngine.getInstance().getState() === 'playing')
     } catch (err) {
       console.error('Failed to start playback:', err)
+      setSaveError(err instanceof Error ? err.message : String(err))
       setIsPlaying(false)
     }
   }
@@ -347,14 +350,13 @@ export const App: React.FC = () => {
           return t
         })
 
-        setTracks(newTracks)
         pushHistory(newTracks)
-        setIsModified(true)
 
         // Preload newly recorded audio for immediate seamless playback
         AudioPlaybackEngine.getInstance().preloadTracks(newTracks).catch(() => {})
       } catch (err) {
         console.error('Failed to stop recording cleanly:', err)
+        setSaveError(err instanceof Error ? err.message : String(err))
         setIsRecording(false)
       }
     } else {
@@ -396,7 +398,7 @@ export const App: React.FC = () => {
             name: 'Mikrofon (Systemstandard)',
             label: 'Mikrofon (Systemstandard)'
           }
-          const filename = `rec_${t.id}_${Date.now()}.wav`
+          const filename = `rec_${crypto.randomUUID()}.wav`
           const filePath = tempDir ? `${tempDir.replace(/[\\/]+$/, '')}\\${filename}` : filename
           configs.push({
             trackId: t.id,
@@ -413,6 +415,7 @@ export const App: React.FC = () => {
         setIsRecording(true)
       } catch (err) {
         console.error('Failed to start recording session:', err)
+        setSaveError(err instanceof Error ? err.message : String(err))
         setIsRecording(false)
       }
     }
@@ -436,47 +439,37 @@ export const App: React.FC = () => {
   }
 
   const handleToggleMute = (trackId: string) => {
-    setTracks((prev) => {
-      const updated = prev.map((t) => (t.id === trackId ? { ...t, muted: !t.muted } : t))
-      AudioPlaybackEngine.getInstance().updateRouting(updated)
-      return updated
-    })
+    const updated = tracks.map((t) => (t.id === trackId ? { ...t, muted: !t.muted } : t))
+    setTracksPresent(updated, true)
+    AudioPlaybackEngine.getInstance().updateRouting(updated)
   }
 
   const handleToggleSolo = (trackId: string) => {
-    setTracks((prev) => {
-      const updated = prev.map((t) => (t.id === trackId ? { ...t, solo: !t.solo } : t))
-      AudioPlaybackEngine.getInstance().updateRouting(updated)
-      return updated
-    })
+    const updated = tracks.map((t) => (t.id === trackId ? { ...t, solo: !t.solo } : t))
+    setTracksPresent(updated, true)
+    AudioPlaybackEngine.getInstance().updateRouting(updated)
   }
 
   const handleVolumeChange = (trackId: string, volume: number) => {
-    setTracks((prev) => {
-      const updated = prev.map((t) => (t.id === trackId ? { ...t, volume } : t))
-      AudioPlaybackEngine.getInstance().updateRouting(updated)
-      return updated
-    })
+    const updated = tracks.map((t) => (t.id === trackId ? { ...t, volume } : t))
+    setTracksPresent(updated, true)
+    AudioPlaybackEngine.getInstance().updateRouting(updated)
   }
 
   const handleInputChange = (trackId: string, input: InputSource) => {
-    setTracks((prev) =>
-      prev.map((t) => (t.id === trackId ? { ...t, inputSource: input } : t))
-    )
+    const updated = tracks.map((t) => (t.id === trackId ? { ...t, inputSource: input } : t))
+    pushHistory(updated)
     // Auto-arm track when an input is selected so multi-track recording works out of the box
     setArmedTrackIds((prev) => {
       const next = new Set(prev)
       next.add(trackId)
       return next
     })
-    setIsModified(true)
   }
 
   const handleRenameTrack = (trackId: string, newName: string) => {
-    setTracks((prev) =>
-      prev.map((t) => (t.id === trackId ? { ...t, name: newName } : t))
-    )
-    setIsModified(true)
+    const updated = tracks.map((t) => (t.id === trackId ? { ...t, name: newName } : t))
+    pushHistory(updated)
   }
 
   const handleOutputDeviceChange = (deviceId: string) => {
@@ -489,210 +482,220 @@ export const App: React.FC = () => {
     AudioPlaybackEngine.getInstance().setMasterVolume(vol)
   }
 
-  // Smart-Cutting Operations (Ripple Cut with 3ms Micro-Fade)
+  // Smart-Cutting Operations (delegating directly to ProjectManager with 3ms Micro-Fades)
   const handleCutRange = useCallback(() => {
     if (!selection) return
     const selStart = Math.min(selection.start, selection.end)
     const selEnd = Math.max(selection.start, selection.end)
-    const cutDuration = selEnd - selStart
-    if (cutDuration <= 0) return
+    if (selEnd - selStart <= 0.0001) return
 
-    const newTracks = tracks.map((track) => {
-      const nextRegions: any[] = []
-      track.regions.forEach((region) => {
-        const regStart = region.startPos
-        const regEnd = region.startPos + region.duration
-
-        // 1. Region is completely before selection: keep unchanged
-        if (regEnd <= selStart) {
-          nextRegions.push({ ...region })
-        }
-        // 2. Region is completely after selection: shift left by cutDuration
-        else if (regStart >= selEnd) {
-          nextRegions.push({
-            ...region,
-            startPos: regStart - cutDuration,
-            fadeIn: 0.003
-          })
-        }
-        // 3. Selection cuts into region
-        else {
-          // Left portion before cut
-          if (regStart < selStart) {
-            nextRegions.push({
-              ...region,
-              id: `${region.id}-a`,
-              duration: selStart - regStart,
-              fadeOut: 0.003
-            })
-          }
-          // Right portion after cut
-          if (regEnd > selEnd) {
-            nextRegions.push({
-              ...region,
-              id: `${region.id}-b`,
-              startPos: selStart,
-              sourceOffset: (region.sourceOffset || 0) + (selEnd - regStart),
-              duration: regEnd - selEnd,
-              fadeIn: 0.003
-            })
-          }
-        }
-      })
-      return { ...track, regions: nextRegions }
-    })
-
-    setTracks(newTracks)
+    const newTracks = ProjectManager.cutRange(tracks, selStart, selEnd)
     pushHistory(newTracks)
     setSelection(null)
     setCurrentTime(selStart)
   }, [selection, tracks, pushHistory])
 
   const handleDeleteBefore = useCallback(() => {
-    if (currentTime <= 0) return
-    const cutDuration = currentTime
-
-    const newTracks = tracks.map((track) => {
-      const nextRegions: any[] = []
-      track.regions.forEach((region) => {
-        const regStart = region.startPos
-        const regEnd = region.startPos + region.duration
-
-        if (regEnd <= currentTime) {
-          // completely dropped
-        } else if (regStart >= currentTime) {
-          nextRegions.push({
-            ...region,
-            startPos: regStart - cutDuration,
-            fadeIn: 0.003
-          })
-        } else {
-          // starts before, ends after
-          nextRegions.push({
-            ...region,
-            startPos: 0,
-            sourceOffset: (region.sourceOffset || 0) + (currentTime - regStart),
-            duration: regEnd - currentTime,
-            fadeIn: 0.003
-          })
-        }
-      })
-      return { ...track, regions: nextRegions }
-    })
-
-    setTracks(newTracks)
+    if (currentTime <= 0.0001) return
+    const newTracks = ProjectManager.cutBefore(tracks, currentTime)
     pushHistory(newTracks)
     setCurrentTime(0)
   }, [currentTime, tracks, pushHistory])
 
   const handleDeleteAfter = useCallback(() => {
-    const newTracks = tracks.map((track) => {
-      const nextRegions: any[] = []
-      track.regions.forEach((region) => {
-        const regStart = region.startPos
-        const regEnd = region.startPos + region.duration
-
-        if (regEnd <= currentTime) {
-          nextRegions.push({ ...region })
-        } else if (regStart < currentTime) {
-          nextRegions.push({
-            ...region,
-            duration: currentTime - regStart,
-            fadeOut: 0.003
-          })
-        }
-      })
-      return { ...track, regions: nextRegions }
-    })
-
-    setTracks(newTracks)
+    const newTracks = ProjectManager.cutAfter(tracks, currentTime)
     pushHistory(newTracks)
     setTotalDuration(currentTime)
   }, [currentTime, tracks, pushHistory])
 
   // Project I/O Actions
-  const handleNewProject = () => {
-    setTracks(INITIAL_TRACKS)
-    setProjectName('Unbenannt.owrp')
-    setIsModified(false)
-    setCurrentTime(0)
-    setSelection(null)
-    setHistoryStack([INITIAL_TRACKS])
-    setHistoryIndex(0)
-  }
-
-  const handleOpenProject = async () => {
-    try {
-      if (window.api?.showOpenDialog) {
-        const res = await window.api.showOpenDialog({
-          title: 'Omega Wave Recorder Projekt öffnen',
-          filters: [
-            { name: 'Omega Wave Recorder Project (*.owrp, *.owep)', extensions: ['owrp', 'owep'] },
-            { name: 'Alle Dateien', extensions: ['*'] }
-          ],
-          properties: ['openFile']
-        })
-        if (!res.canceled && res.filePaths?.[0]) {
-          const filePath = res.filePaths[0]
-          const loaded = await window.api.loadProject(filePath)
-          if (loaded.success && loaded.data) {
-            if (Array.isArray(loaded.data.tracks)) setTracks(loaded.data.tracks)
-            const baseName = filePath.split(/[/\\]/).pop() || 'Projekt.owrp'
-            setProjectName(baseName)
-            setIsModified(false)
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to open project:', e)
-    }
-  }
-
-  const handleSaveProject = async () => {
+  const saveProjectFile = async (targetPath: string): Promise<boolean> => {
+    setSaveError(null)
     try {
       const projectData: Project = {
         format: 'OWRP',
         version: '1.0.0',
         tracks,
         settings: {
-          sampleRate: 48000,
+          sampleRate: AudioPlaybackEngine.getInstance().getSampleRate(),
           zoomLevel: 1.0,
           playheadPos: currentTime
         },
         metadata: {
           createdAt: Date.now(),
           updatedAt: Date.now(),
-          author: 'Omega Wave Recorder'
+          author: 'Omega Wave Recorder',
+          title: ProjectManager.getDisplayName(targetPath)
         }
       }
 
-      if (window.api?.saveProject) {
-        await window.api.saveProject(projectName, projectData)
+      const res = await ProjectManager.saveProject(targetPath, projectData)
+      if (!res.success) {
+        const errorMsg = res.error || 'Fehler beim Speichern der Projektdatei.'
+        setSaveError(errorMsg)
+        return false
       }
-      setIsModified(false)
-    } catch (e) {
-      console.warn('Failed to save project:', e)
+
+      const finalPath = res.filePath || targetPath
+      setProjectFilePath(finalPath)
+      setProjectName(ProjectManager.getDisplayName(finalPath))
+      historyMarkClean(tracks)
+      setSaveError(null)
+      return true
+    } catch (err: any) {
+      const errorMsg = err?.message || String(err) || 'Unerwarteter Fehler beim Speichern.'
+      setSaveError(errorMsg)
+      return false
     }
   }
 
-  const handleSaveProjectAs = async () => {
+  const handleSaveProjectAs = async (): Promise<boolean> => {
     try {
-      if (window.api?.showSaveDialog) {
-        const res = await window.api.showSaveDialog({
-          title: 'Projekt speichern unter...',
-          defaultPath: projectName,
-          filters: [
-            { name: 'Omega Wave Recorder Project (*.owrp)', extensions: ['owrp'] }
-          ]
-        })
-        if (!res.canceled && res.filePath) {
-          const baseName = res.filePath.split(/[/\\]/).pop() || 'Projekt.owrp'
-          setProjectName(baseName)
-          handleSaveProject()
-        }
+      if (!window.api?.showSaveDialog) {
+        setSaveError('Speichern-Dialog ist nicht verfügbar.')
+        return false
       }
-    } catch (e) {
-      console.warn('Failed to save project as:', e)
+
+      const defaultPath = projectFilePath || projectName || 'Neues Projekt.owrp'
+      const res = await window.api.showSaveDialog({
+        title: 'Projekt speichern unter...',
+        defaultPath,
+        filters: [
+          { name: 'Omega Wave Recorder Projekt (*.owrp)', extensions: ['owrp'] },
+          { name: 'Omega Wave Editor Projekt (*.owep)', extensions: ['owep'] },
+          { name: 'Alle Dateien (*.*)', extensions: ['*'] }
+        ]
+      })
+
+      if (!res.canceled && res.filePath) {
+        // Direct pass of user-selected path avoids stale React state closures
+        return await saveProjectFile(res.filePath)
+      }
+      return false
+    } catch (e: any) {
+      setSaveError(e?.message || 'Fehler beim Öffnen des Speichern-Dialogs.')
+      return false
+    }
+  }
+
+  const handleSaveProject = async (): Promise<boolean> => {
+    if (!projectFilePath || ProjectManager.isUnnamed(projectFilePath)) {
+      return await handleSaveProjectAs()
+    }
+    return await saveProjectFile(projectFilePath)
+  }
+
+  const handleNewProject = async () => {
+    if (AudioRecordingEngine.getInstance().isRecording()) {
+      setSaveError('Bitte die Aufnahme stoppen, bevor ein neues Projekt erstellt wird.')
+      return
+    }
+    if (isModified) {
+      const confirmMsg = 'Das aktuelle Projekt enthält ungespeicherte Änderungen. Möchten Sie wirklich ein neues Projekt erstellen?'
+      const proceed = typeof window !== 'undefined' && typeof window.confirm === 'function'
+        ? window.confirm(confirmMsg)
+        : true
+      if (!proceed) return
+    }
+
+    if (isRecording) {
+      try {
+        await AudioRecordingEngine.getInstance().stopRecording()
+      } catch (err) {
+        console.warn('Error stopping recording during New Project:', err)
+      }
+      setIsRecording(false)
+    }
+    AudioPlaybackEngine.getInstance().stop(true)
+    setIsPlaying(false)
+
+    // Clear playback buffer cache at project boundary
+    AudioPlaybackEngine.getInstance().clearCache()
+
+    clearHistory(INITIAL_TRACKS)
+    setArmedTrackIds(new Set([INITIAL_TRACKS[0].id]))
+    setActiveTrackIndex(0)
+    setLiveRecordedPeaks({})
+    setProjectFilePath(null)
+    setProjectName('Unbenannt.owrp')
+    setSaveError(null)
+
+    setCurrentTime(0)
+    setSelection(null)
+    setTotalDuration(0)
+  }
+
+  const handleOpenProject = async () => {
+    if (AudioRecordingEngine.getInstance().isRecording()) {
+      setSaveError('Bitte die Aufnahme stoppen, bevor ein anderes Projekt geöffnet wird.')
+      return
+    }
+    try {
+      if (!window.api?.showOpenDialog) return
+
+      const res = await window.api.showOpenDialog({
+        title: 'Omega Wave Recorder Projekt öffnen',
+        filters: [
+          { name: 'Omega Wave Recorder Project (*.owrp, *.owep)', extensions: ['owrp', 'owep'] },
+          { name: 'Alle Dateien', extensions: ['*'] }
+        ],
+        properties: ['openFile']
+      })
+
+      if (!res.canceled && res.filePaths?.[0]) {
+        if (isModified) {
+          const confirmMsg = 'Das aktuelle Projekt enthält ungespeicherte Änderungen. Möchten Sie wirklich ein anderes Projekt öffnen?'
+          const proceed = typeof window !== 'undefined' && typeof window.confirm === 'function'
+            ? window.confirm(confirmMsg)
+            : true
+          if (!proceed) return
+        }
+
+        const filePath = res.filePaths[0]
+
+        if (isRecording) {
+          try {
+            await AudioRecordingEngine.getInstance().stopRecording()
+          } catch (err) {
+            console.warn('Error stopping recording during Open Project:', err)
+          }
+          setIsRecording(false)
+        }
+        AudioPlaybackEngine.getInstance().stop(true)
+        setIsPlaying(false)
+
+        // Clear playback buffer cache at project boundary
+        AudioPlaybackEngine.getInstance().clearCache()
+
+        const loaded = await ProjectManager.loadProject(filePath)
+        if (!loaded.success || !loaded.project) {
+          setSaveError(loaded.error || 'Fehler beim Laden des Projekts.')
+          return
+        }
+
+        const project = loaded.project
+        const projectTracks = Array.isArray(project.tracks) ? project.tracks : INITIAL_TRACKS
+
+        clearHistory(projectTracks)
+        setArmedTrackIds(new Set(projectTracks[0] ? [projectTracks[0].id] : []))
+        setActiveTrackIndex(0)
+        setLiveRecordedPeaks({})
+
+        const finalPath = loaded.filePath || filePath
+        setProjectFilePath(finalPath)
+        setProjectName(ProjectManager.getDisplayName(finalPath))
+        setSaveError(null)
+
+        const initialPlayhead = project.settings?.playheadPos || 0
+        setCurrentTime(initialPlayhead)
+        setSelection(null)
+
+        AudioPlaybackEngine.getInstance().updateRouting(projectTracks)
+        AudioPlaybackEngine.getInstance().preloadTracks(projectTracks).catch(() => {})
+      }
+    } catch (e: any) {
+      console.warn('Failed to open project:', e)
+      setSaveError(e?.message || 'Fehler beim Öffnen des Projekts.')
     }
   }
 
@@ -835,6 +838,9 @@ export const App: React.FC = () => {
     handleCutRange,
     handleUndo,
     handleRedo,
+    projectFilePath,
+    projectName,
+    isModified,
     tracks
   ])
 
@@ -881,10 +887,30 @@ export const App: React.FC = () => {
         }}
         onOpenMessageCenter={() => setActiveModal('messages')}
         onOpenAbout={() => setActiveModal('about')}
-        canUndo={historyIndex > 0}
-        canRedo={historyIndex < historyStack.length - 1}
+        canUndo={canUndo}
+        canRedo={canRedo}
         hasSelection={selection !== null}
       />
+
+      {/* Inline Alert for errors (e.g. Save / Load failure) */}
+      {saveError && (
+        <div
+          role="alert"
+          className="bg-red-900/90 border-b border-red-500/80 text-red-100 px-4 py-1.5 text-xs flex items-center justify-between z-50 shrink-0 shadow-md backdrop-blur-sm animate-in fade-in duration-150"
+        >
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-red-300">Fehler:</span>
+            <span>{saveError}</span>
+          </div>
+          <button
+            onClick={() => setSaveError(null)}
+            className="text-red-300 hover:text-white font-bold px-1.5 py-0.5 rounded hover:bg-red-800/60 transition-colors"
+            title="Schließen"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* 3. Main Workspace Area */}
       <div className="flex-1 flex flex-col overflow-hidden bg-[#16181b]">

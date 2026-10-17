@@ -39,6 +39,7 @@ export class ProjectManager {
         locked: false,
         visible: true,
         volume: 1.0,
+        height: 74,
         color: '#0078d7', // Omega Blue
         inputSource: {
           type: 'device',
@@ -58,6 +59,7 @@ export class ProjectManager {
         locked: false,
         visible: true,
         volume: 1.0,
+        height: 74,
         color: '#10b981', // Emerald
         inputSource: {
           type: 'process',
@@ -77,6 +79,7 @@ export class ProjectManager {
         locked: false,
         visible: true,
         volume: 1.0,
+        height: 74,
         color: '#8b5cf6', // Purple
         inputSource: {
           type: 'process',
@@ -96,6 +99,7 @@ export class ProjectManager {
         locked: false,
         visible: true,
         volume: 1.0,
+        height: 74,
         color: '#f59e0b', // Amber
         inputSource: {
           type: 'device',
@@ -130,7 +134,7 @@ export class ProjectManager {
   public static async saveProject(
     filePath: string,
     project: Project
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; filePath?: string; error?: string }> {
     const api = typeof window !== 'undefined' ? (window as any).api : undefined
     if (!api?.saveProject) {
       return { success: false, error: 'window.api.saveProject is not available' }
@@ -163,7 +167,7 @@ export class ProjectManager {
    */
   public static async loadProject(
     filePath: string
-  ): Promise<{ success: boolean; project?: Project; error?: string }> {
+  ): Promise<{ success: boolean; project?: Project; filePath?: string; error?: string }> {
     const api = typeof window !== 'undefined' ? (window as any).api : undefined
     if (!api?.loadProject) {
       return { success: false, error: 'window.api.loadProject is not available' }
@@ -192,7 +196,7 @@ export class ProjectManager {
         }
       }
 
-      return { success: true, project }
+      return { success: true, project, filePath: res.filePath || filePath }
     } catch (err: any) {
       console.error('[ProjectManager] Error loading project:', err)
       return { success: false, error: err?.message || String(err) }
@@ -388,20 +392,20 @@ export class ProjectManager {
   }
 
   // ==========================================
-  // Path Utilities
+  // Path Utilities & Name Helpers
   // ==========================================
 
-  private static getDirectoryName(p: string): string {
+  public static getDirectoryName(p: string): string {
     const normalized = p.replace(/\\/g, '/')
     const idx = normalized.lastIndexOf('/')
     return idx === -1 ? '.' : normalized.substring(0, idx)
   }
 
-  private static isAbsolutePath(p: string): boolean {
+  public static isAbsolutePath(p: string): boolean {
     return /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('/')
   }
 
-  private static makeRelativePath(fromDir: string, toPath: string): string {
+  public static makeRelativePath(fromDir: string, toPath: string): string {
     const fromNorm = fromDir.replace(/\\/g, '/').replace(/\/$/, '')
     const toNorm = toPath.replace(/\\/g, '/')
 
@@ -411,10 +415,33 @@ export class ProjectManager {
     return toNorm
   }
 
-  private static resolveAbsolutePath(fromDir: string, relPath: string): string {
+  public static resolveAbsolutePath(fromDir: string, relPath: string): string {
     if (this.isAbsolutePath(relPath)) return relPath
     const fromNorm = fromDir.replace(/\\/g, '/').replace(/\/$/, '')
     const relNorm = relPath.replace(/\\/g, '/').replace(/^\.\//, '')
     return `${fromNorm}/${relNorm}`
+  }
+
+  /**
+   * Determines whether a project path is unassigned or unnamed.
+   */
+  public static isUnnamed(filePath: string | null | undefined): boolean {
+    if (!filePath || typeof filePath !== 'string') return true
+    const trimmed = filePath.trim()
+    if (!trimmed || trimmed === 'Unbenannt.owrp' || trimmed === 'Neues Projekt.owrp') return true
+    return !this.isAbsolutePath(trimmed)
+  }
+
+  /**
+   * Extracts clean display name from a project path.
+   */
+  public static getDisplayName(filePath: string | null | undefined, fallback: string = 'Unbenannt.owrp'): string {
+    if (!filePath || typeof filePath !== 'string') return fallback
+    const trimmed = filePath.trim()
+    if (!trimmed) return fallback
+    const normalized = trimmed.replace(/\\/g, '/')
+    const parts = normalized.split('/')
+    const last = parts.pop() || ''
+    return last || fallback
   }
 }

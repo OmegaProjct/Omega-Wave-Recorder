@@ -37,9 +37,8 @@ interface ActiveSession {
   stream?: MediaStream
   sourceNode?: MediaStreamAudioSourceNode
   workletNode?: AudioWorkletNode
+  silentGain?: GainNode
   totalSamples: number
-  chunksL: Float32Array[]
-  chunksR: Float32Array[]
   unwrittenL: Float32Array[]
   unwrittenR: Float32Array[]
   unwrittenSamples: number
@@ -49,11 +48,12 @@ interface ActiveSession {
   peakLdBFS: number
   peakRdBFS: number
   lastPeakUpdate: number
+  writeQueue: Promise<void>
+  pendingSamples: number
 }
 
 // Falloff / decay rate for peaks (dB per millisecond)
 const PEAK_DECAY_DB_PER_MS = 0.05
-const FLUSH_THRESHOLD_SAMPLES = 48000 // Flush to disk roughly every 1 second of audio
 
 export class AudioRecordingEngine {
   private static instance: AudioRecordingEngine | null = null
@@ -62,12 +62,18 @@ export class AudioRecordingEngine {
   private workletLoaded: boolean = false
   private isRecordingState: boolean = false
   private isPausedState: boolean = false
+  private isStartingState: boolean = false
+  private isStoppingState: boolean = false
+  private activeStopPromise: Promise<RecordingResult[]> | null = null
+
   private startTime: number = 0
   private pauseTime: number = 0
   private totalPausedDuration: number = 0
 
   private sessions: Map<string, ActiveSession> = new Map()
   private loopbackCleanup?: () => void
+  private recordingError: Error | null = null
+  private errorListeners = new Set<(error: Error) => void>()
 
   private peakListeners: Set<(peaks: Record<string, LivePeak>) => void> = new Set()
   private chunkListeners: Set<(trackId: string, left: Float32Array, right: Float32Array) => void> = new Set()
@@ -102,11 +108,28 @@ export class AudioRecordingEngine {
   }
 
   public isRecording(): boolean {
-    return this.isRecordingState
+    return this.isRecordingState || this.isStartingState || this.isStoppingState
   }
 
   public isPaused(): boolean {
     return this.isPausedState
+  }
+
+  public getSampleRate(): number {
+    return this.audioCtx?.sampleRate || 48000
+  }
+
+  public onError(listener: (error: Error) => void): () => void {
+    this.errorListeners.add(listener)
+    return () => { this.errorListeners.delete(listener) }
+  }
+
+  private failRecording(error: Error): void {
+    if (this.recordingError) return
+    this.recordingError = error
+    this.pauseRecording()
+    for (const session of this.sessions.values()) this.cleanupSession(session)
+    for (const listener of this.errorListeners) listener(error)
   }
 
   public getDuration(): number {
@@ -122,15 +145,19 @@ export class AudioRecordingEngine {
    */
   private async getAudioContext(): Promise<AudioContext> {
     if (!this.audioCtx || this.audioCtx.state === 'closed') {
-      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext
-      this.audioCtx = new AudioCtxClass({ latencyHint: 'interactive' })
+      const AudioCtxClass = typeof window !== 'undefined'
+        ? (window.AudioContext || (window as any).webkitAudioContext)
+        : undefined
+      if (AudioCtxClass) {
+        this.audioCtx = new AudioCtxClass({ latencyHint: 'interactive' })
+      }
       this.workletLoaded = false
     }
-    if (this.audioCtx.state === 'suspended') {
+    if (this.audioCtx && this.audioCtx.state === 'suspended') {
       await this.audioCtx.resume()
     }
     await this.ensureWorkletModule()
-    return this.audioCtx
+    return this.audioCtx!
   }
 
   /**
@@ -169,141 +196,195 @@ export class AudioRecordingEngine {
 
   /**
    * Starts recording on all specified tracks simultaneously.
+   * Dynamically aligns to actual AudioContext sample rate.
    */
   public async startRecording(
     tracks: RecordingTrackConfig[],
-    sampleRate: number = 48000
+    _requestedSampleRate?: number
   ): Promise<void> {
-    if (this.isRecordingState) {
-      throw new Error('Recording is already in progress.')
+    if (this.isStartingState || this.isRecordingState) {
+      throw new Error('Recording is already in progress or starting.')
+    }
+    if (this.isStoppingState) {
+      throw new Error('Cannot start recording while a recording session is stopping.')
     }
 
     if (tracks.length === 0) {
       throw new Error('No tracks configured for recording.')
     }
 
-    const ctx = await this.getAudioContext()
-    this.sessions.clear()
+    this.isStartingState = true
+    this.recordingError = null
 
-    // Setup active sessions for each track
-    for (const track of tracks) {
-      const session: ActiveSession = {
-        trackId: track.trackId,
-        inputSource: track.inputSource,
-        tempFilePath: track.tempFilePath,
-        sampleRate: sampleRate || ctx.sampleRate || 48000,
-        channels: 2,
-        totalSamples: 0,
-        chunksL: [],
-        chunksR: [],
-        unwrittenL: [],
-        unwrittenR: [],
-        unwrittenSamples: 0,
-        recordedPeaks: [],
-        peakL: 0,
-        peakR: 0,
-        peakLdBFS: -60,
-        peakRdBFS: -60,
-        lastPeakUpdate: Date.now()
+    try {
+      const ctx = await this.getAudioContext()
+      if (!ctx) throw new Error('Web Audio ist nicht verfügbar.')
+      const actualSampleRate = ctx.sampleRate
+      this.sessions.clear()
+
+      const api = typeof window !== 'undefined' ? (window as any).api : undefined
+      if (!api?.initRecordingWav || !api?.appendRecordingChunk || !api?.finalizeRecordingWav) {
+        throw new Error('Die Schnittstelle zum sicheren Speichern von Aufnahmen fehlt.')
+      }
+      if (new Set(tracks.map(track => track.trackId)).size !== tracks.length) {
+        throw new Error('Aufnahmespuren müssen eindeutige IDs haben.')
       }
 
-      if (track.inputSource.type === 'device') {
-        // Hardware microphone capture via Web Audio API + AudioWorklet
-        const deviceId = track.inputSource.deviceId || track.inputSource.id
-        const isDefault = !deviceId || deviceId === 'default'
-        const constraints: MediaStreamConstraints = {
-          audio: {
-            deviceId: isDefault ? undefined : { ideal: deviceId },
-            channelCount: { ideal: 2, min: 1 },
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false
+      // Setup active sessions for each track
+      for (const track of tracks) {
+        const session: ActiveSession = {
+          trackId: track.trackId,
+          inputSource: track.inputSource,
+          tempFilePath: track.tempFilePath,
+          sampleRate: track.inputSource.type === 'process' ? 48000 : actualSampleRate,
+          channels: 2,
+          totalSamples: 0,
+          unwrittenL: [],
+          unwrittenR: [],
+          unwrittenSamples: 0,
+          recordedPeaks: [],
+          peakL: 0,
+          peakR: 0,
+          peakLdBFS: -60,
+          peakRdBFS: -60,
+          lastPeakUpdate: Date.now(),
+          writeQueue: Promise.resolve(),
+          pendingSamples: 0
+        }
+        this.sessions.set(track.trackId, session)
+
+        // Initialize 44-byte WAV header on disk to enable O(1) in-place header patching
+        if (api?.initRecordingWav) {
+          const initRes = await api.initRecordingWav(
+            session.trackId,
+            session.tempFilePath,
+            session.sampleRate,
+            session.channels
+          )
+          if (!initRes?.success) {
+            throw new Error(initRes.error || `Failed to initialize recording file for track ${session.trackId}`)
           }
         }
 
-        try {
-          let stream: MediaStream
-          try {
-            stream = await navigator.mediaDevices.getUserMedia(constraints)
-          } catch (constraintErr) {
-            console.warn(`[AudioRecordingEngine] Preferred constraints failed for track ${track.trackId}, retrying with basic device constraints:`, constraintErr)
-            stream = await navigator.mediaDevices.getUserMedia({
-              audio: isDefault ? true : { deviceId: { ideal: deviceId } }
-            })
+        if (track.inputSource.type === 'device') {
+          // Hardware microphone capture via Web Audio API + AudioWorklet
+          const deviceId = track.inputSource.deviceId || track.inputSource.id
+          const isDefault = !deviceId || deviceId === 'default'
+          const constraints: MediaStreamConstraints = {
+            audio: {
+              deviceId: isDefault ? undefined : { ideal: deviceId },
+              channelCount: { ideal: 2, min: 1 },
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false
+            }
           }
 
-          const sourceNode = ctx.createMediaStreamSource(stream)
-          const workletNode = new AudioWorkletNode(ctx, 'omega-recording-processor')
-
-          workletNode.port.onmessage = (e) => {
-            const { left, right } = e.data
-            this.handleAudioChunk(track.trackId, left, right)
-          }
-
-          sourceNode.connect(workletNode)
-          // Silent terminator so the graph pulls data without routing to speakers
-          const silentGain = ctx.createGain()
-          silentGain.gain.value = 0
-          workletNode.connect(silentGain)
-          silentGain.connect(ctx.destination)
-
-          session.stream = stream
-          session.sourceNode = sourceNode
-          session.workletNode = workletNode
-          this.sessions.set(track.trackId, session)
-        } catch (err) {
-          console.error(`[AudioRecordingEngine] Failed to initialize device input for track ${track.trackId}:`, err)
-        }
-      } else if (track.inputSource.type === 'process') {
-        // Application WASAPI Loopback capture via Main process
-        const pid = track.inputSource.pid || (track.inputSource.id ? parseInt(track.inputSource.id, 10) : undefined)
-        const api = typeof window !== 'undefined' ? (window as any).api : undefined
-        if (pid && api?.startLoopbackCapture) {
           try {
-            await api.startLoopbackCapture(pid, track.trackId)
+            let stream: MediaStream
+            try {
+              stream = await navigator.mediaDevices.getUserMedia(constraints)
+            } catch (constraintErr) {
+              console.warn(`[AudioRecordingEngine] Preferred constraints failed for track ${track.trackId}, retrying with basic device constraints:`, constraintErr)
+              stream = await navigator.mediaDevices.getUserMedia({
+                audio: isDefault ? true : { deviceId: { ideal: deviceId } }
+              })
+            }
+
+            session.stream = stream
+            const sourceNode = ctx.createMediaStreamSource(stream)
+            session.sourceNode = sourceNode
+            const workletNode = new AudioWorkletNode(ctx, 'omega-recording-processor')
+            session.workletNode = workletNode
+
+            workletNode.port.onmessage = (e) => {
+              const { left, right } = e.data
+              this.handleAudioChunk(track.trackId, left, right)
+            }
+
+            sourceNode.connect(workletNode)
+            // Silent terminator so the graph pulls data without routing to speakers
+            const silentGain = ctx.createGain()
+            session.silentGain = silentGain
+            silentGain.gain.value = 0
+            workletNode.connect(silentGain)
+            silentGain.connect(ctx.destination)
+
+            session.stream = stream
+            session.sourceNode = sourceNode
+            session.workletNode = workletNode
+            session.silentGain = silentGain
             this.sessions.set(track.trackId, session)
           } catch (err) {
-            console.warn(`[AudioRecordingEngine] Failed to start WASAPI loopback for PID ${pid}:`, err)
+            console.error(`[AudioRecordingEngine] Failed to initialize device input for track ${track.trackId}:`, err)
+            this.cleanupSession(session)
+            throw err
           }
-        } else {
-          this.sessions.set(track.trackId, session)
+        } else if (track.inputSource.type === 'process') {
+          // Application WASAPI Loopback capture via Main process
+          const pid = track.inputSource.pid || (track.inputSource.id ? parseInt(track.inputSource.id, 10) : undefined)
+          if (pid && api?.startLoopbackCapture) {
+            try {
+              const started = await api.startLoopbackCapture(pid, track.trackId)
+              if (!started?.success) throw new Error(started?.error || 'Programmaufnahme konnte nicht gestartet werden.')
+              this.sessions.set(track.trackId, session)
+            } catch (err) {
+              console.warn(`[AudioRecordingEngine] Failed to start WASAPI loopback for PID ${pid}:`, err)
+              throw err
+            }
+          } else {
+            throw new Error(`Keine gültige Programmquelle für Spur ${track.trackId}. Bitte das Programm erneut auswählen.`)
+          }
         }
       }
-    }
 
-    if (this.sessions.size === 0) {
-      throw new Error('Kein Audiogerät konnte für die Aufnahme initialisiert werden.')
-    }
+      if (this.sessions.size === 0) {
+        throw new Error('Kein Audiogerät konnte für die Aufnahme initialisiert werden.')
+      }
 
-    // Attach loopback chunk IPC listener if any process tracks exist
-    const hasProcessTracks = tracks.some((t) => t.inputSource.type === 'process')
-    const winApi = typeof window !== 'undefined' ? (window as any).api : undefined
-    if (hasProcessTracks && winApi?.onLoopbackChunk) {
-      this.loopbackCleanup = winApi.onLoopbackChunk((event: LoopbackChunkEvent) => {
-        // Match session by trackId or by PID
-        for (const session of this.sessions.values()) {
-          const matchesTrack = event.trackId && session.trackId === event.trackId
-          const matchesPid = event.pid && session.inputSource.pid === event.pid
-          if (matchesTrack || matchesPid) {
-            const left = event.left instanceof Float32Array ? event.left : new Float32Array(event.left)
-            const right = event.right instanceof Float32Array ? event.right : new Float32Array(event.right || event.left)
-            this.handleAudioChunk(session.trackId, left, right)
-            break
+      // Attach loopback chunk IPC listener if any process tracks exist
+      const hasProcessTracks = tracks.some((t) => t.inputSource.type === 'process')
+      if (hasProcessTracks && api?.onLoopbackChunk) {
+        this.loopbackCleanup = api.onLoopbackChunk((event: LoopbackChunkEvent) => {
+          for (const session of this.sessions.values()) {
+            const matches = event.trackId ? session.trackId === event.trackId : event.pid && session.inputSource.pid === event.pid
+            if (matches) {
+              if (event.sampleRate && event.sampleRate !== session.sampleRate) {
+                this.failRecording(new Error('Die Abtastrate der Programmaufnahme hat sich geändert.'))
+                return
+              }
+              const left = event.left instanceof Float32Array ? event.left : new Float32Array(event.left)
+              const right = event.right instanceof Float32Array ? event.right : new Float32Array(event.right || event.left)
+              this.handleAudioChunk(session.trackId, left, right)
+            }
           }
-        }
-      })
-    }
+        })
+      }
+      if (hasProcessTracks && api?.onLoopbackError) {
+        const chunkCleanup = this.loopbackCleanup
+        const errorCleanup = api.onLoopbackError((event: { trackId: string; error: string }) => {
+          if (this.sessions.has(event.trackId)) this.failRecording(new Error(event.error))
+        })
+        this.loopbackCleanup = () => { chunkCleanup?.(); errorCleanup() }
+      }
 
-    this.isRecordingState = true
-    this.isPausedState = false
-    this.startTime = Date.now()
-    this.pauseTime = 0
-    this.totalPausedDuration = 0
+      this.isRecordingState = true
+      this.isPausedState = false
+      this.startTime = Date.now()
+      this.pauseTime = 0
+      this.totalPausedDuration = 0
+    } catch (err) {
+      this.releaseAllResources()
+      throw err
+    } finally {
+      this.isStartingState = false
+    }
   }
 
   /**
    * Processes a live chunk for a track: computes peaks, feeds waveform drawer,
    * buffers PCM, and triggers periodic disk flush.
+   * Releases Float32Array audio chunk arrays immediately after flushing.
    */
   private handleAudioChunk(trackId: string, left: Float32Array, right: Float32Array): void {
     const session = this.sessions.get(trackId)
@@ -331,11 +412,9 @@ export class AudioRecordingEngine {
       listener(trackId, left, right)
     }
 
-    // 3. If actively recording (and not paused), accumulate data and stream to disk
+    // 3. If actively recording (and not paused), accumulate unwritten chunks and stream directly to disk
     if (this.isRecordingState && !this.isPausedState) {
       session.recordedPeaks.push(Math.max(pL, pR))
-      session.chunksL.push(left)
-      session.chunksR.push(right)
       session.totalSamples += len
 
       session.unwrittenL.push(left)
@@ -343,7 +422,8 @@ export class AudioRecordingEngine {
       session.unwrittenSamples += len
 
       // Direct Disk Streaming: Stream chunks to prevent RAM overflow on long takes
-      if (session.unwrittenSamples >= FLUSH_THRESHOLD_SAMPLES) {
+      const flushThreshold = session.sampleRate || 48000
+      if (session.unwrittenSamples >= flushThreshold) {
         this.flushSessionToDisk(session).catch((err) => {
           console.warn(`[AudioRecordingEngine] Disk streaming warning for track ${trackId}:`, err)
         })
@@ -352,36 +432,53 @@ export class AudioRecordingEngine {
   }
 
   /**
-   * Flushes accumulated chunks for a track to disk via IPC streaming.
+   * Flushes accumulated chunks for a track to disk via serialized IPC streaming.
+   * Audio chunk arrays are discarded after conversion to avoid in-memory accumulation.
    */
-  private async flushSessionToDisk(session: ActiveSession): Promise<void> {
+  public async flushSessionToDisk(session: ActiveSession): Promise<void> {
     if (session.unwrittenSamples === 0) return
 
     const samplesToFlush = session.unwrittenSamples
+    if ((session.pendingSamples || 0) + samplesToFlush > session.sampleRate * 5) {
+      const error = new Error(`Die Festplatte ist zu langsam. Aufnahme abgebrochen: ${session.tempFilePath}`)
+      this.failRecording(error)
+      throw error
+    }
     const chunksL = session.unwrittenL
     const chunksR = session.unwrittenR
 
+    // Release chunk references from memory immediately
     session.unwrittenL = []
     session.unwrittenR = []
     session.unwrittenSamples = 0
 
-    const api = typeof window !== 'undefined' ? (window as any).api : undefined
-    if (api?.appendRecordingChunk) {
-      // Interleave into 16-bit PCM for disk append
-      const interleaved = new Int16Array(samplesToFlush * 2)
-      let offset = 0
-      for (let c = 0; c < chunksL.length; c++) {
-        const l = chunksL[c]
-        const r = chunksR[c] || l
-        for (let i = 0; i < l.length; i++) {
-          const sL = Math.max(-1, Math.min(1, l[i]))
-          const sR = Math.max(-1, Math.min(1, r[i]))
-          interleaved[offset++] = sL < 0 ? sL * 0x8000 : sL * 0x7fff
-          interleaved[offset++] = sR < 0 ? sR * 0x8000 : sR * 0x7fff
-        }
+    // Interleave into 16-bit PCM for disk append
+    const interleaved = new Int16Array(samplesToFlush * 2)
+    let offset = 0
+    for (let c = 0; c < chunksL.length; c++) {
+      const l = chunksL[c]
+      const r = chunksR[c] || l
+      for (let i = 0; i < l.length; i++) {
+        const sL = Math.max(-1, Math.min(1, l[i]))
+        const sR = Math.max(-1, Math.min(1, r[i]))
+        interleaved[offset++] = sL < 0 ? sL * 0x8000 : sL * 0x7fff
+        interleaved[offset++] = sR < 0 ? sR * 0x8000 : sR * 0x7fff
       }
-      await api.appendRecordingChunk(session.trackId, session.tempFilePath, interleaved.buffer)
     }
+
+    // Serialize disk append operations per track via a promise chain
+    const api = typeof window !== 'undefined' ? (window as any).api : undefined
+    session.pendingSamples = (session.pendingSamples || 0) + samplesToFlush
+    session.writeQueue = session.writeQueue.then(async () => {
+      if (!api?.appendRecordingChunk) throw new Error('Die Aufnahmeschnittstelle ist nicht verfügbar.')
+      const res = await api.appendRecordingChunk(session.trackId, session.tempFilePath, interleaved.buffer)
+      if (!res?.success) {
+        throw new Error(res?.error || `Failed to append recording chunk for track ${session.trackId}`)
+      }
+    }).finally(() => { session.pendingSamples -= samplesToFlush })
+    void session.writeQueue.catch(error => this.failRecording(error))
+
+    return session.writeQueue
   }
 
   /**
@@ -403,91 +500,157 @@ export class AudioRecordingEngine {
   }
 
   /**
-   * Stops recording on all tracks, flushes data to disk, encodes valid WAV files,
+   * Stops recording on all tracks, flushes data to disk, finalizes WAV files in O(1) constant memory,
    * cleans up hardware media streams and WASAPI loopback, and returns results.
+   * Protected against concurrent invocations.
    */
   public async stopRecording(): Promise<RecordingResult[]> {
-    if (!this.isRecordingState) {
+    if (!this.isRecordingState && !this.isStoppingState) {
       return []
     }
 
-    this.isRecordingState = false
-    this.isPausedState = false
+    if (this.isStoppingState && this.activeStopPromise) {
+      return this.activeStopPromise
+    }
 
-    // Clean up loopback IPC subscription
+    this.isStoppingState = true
+
+    this.activeStopPromise = (async () => {
+      try {
+        this.isRecordingState = false
+        this.isPausedState = false
+
+        // 1. Immediately release all hardware streams, nodes, and loopback captures
+        for (const session of this.sessions.values()) {
+          this.cleanupSession(session)
+        }
+
+        if (this.loopbackCleanup) {
+          try {
+            this.loopbackCleanup()
+          } catch {}
+          this.loopbackCleanup = undefined
+        }
+
+        const results: RecordingResult[] = []
+        const api = typeof window !== 'undefined' ? (window as any).api : undefined
+
+        for (const session of this.sessions.values()) {
+          try {
+            await session.writeQueue
+            // 2. Flush any remaining unwritten chunks
+            await this.flushSessionToDisk(session)
+
+            // 3. Await all pending serialized disk appends
+            await session.writeQueue
+
+            // 4. Finalize WAV file on disk (O(1) constant memory)
+            let finalFilePath = session.tempFilePath
+            if (api?.finalizeRecordingWav) {
+              const finRes = await api.finalizeRecordingWav(
+                session.trackId,
+                session.tempFilePath,
+                session.totalSamples,
+                session.sampleRate,
+                session.channels
+              )
+              if (!finRes || finRes.success === false) {
+                throw new Error(finRes?.error || `Fehler beim Finalisieren der WAV-Datei für Spur ${session.trackId}`)
+              }
+              if (finRes.filePath) {
+                finalFilePath = finRes.filePath
+              }
+            }
+
+            const duration = session.sampleRate > 0 ? session.totalSamples / session.sampleRate : 0
+
+            results.push({
+              trackId: session.trackId,
+              filePath: finalFilePath,
+              duration: Math.max(0, duration),
+              sampleRate: session.sampleRate,
+              totalSamples: session.totalSamples,
+              channels: session.channels,
+              peaks: session.recordedPeaks
+            })
+          } catch (trackErr) {
+            console.error(`[AudioRecordingEngine] Error finalizing recording for track ${session.trackId}:`, trackErr)
+            throw trackErr
+          }
+        }
+
+        this.sessions.clear()
+        return results
+      } finally {
+        this.isStoppingState = false
+        this.activeStopPromise = null
+      }
+    })()
+
+    return this.activeStopPromise
+  }
+
+  /**
+   * Clean up hardware streams and Web Audio nodes for an individual session.
+   */
+  private cleanupSession(session: ActiveSession): void {
+    if (session.stream) {
+      try {
+        session.stream.getTracks().forEach((track) => track.stop())
+      } catch (e) {
+        console.warn('[AudioRecordingEngine] Error stopping media track:', e)
+      }
+      session.stream = undefined
+    }
+    if (session.sourceNode) {
+      try {
+        session.sourceNode.disconnect()
+      } catch (e) {
+        console.warn('[AudioRecordingEngine] Error disconnecting sourceNode:', e)
+      }
+      session.sourceNode = undefined
+    }
+    if (session.workletNode) {
+      try {
+        session.workletNode.disconnect()
+      } catch (e) {
+        console.warn('[AudioRecordingEngine] Error disconnecting workletNode:', e)
+      }
+      session.workletNode = undefined
+    }
+    if (session.silentGain) {
+      try {
+        session.silentGain.disconnect()
+      } catch (e) {
+        console.warn('[AudioRecordingEngine] Error disconnecting silentGain:', e)
+      }
+      session.silentGain = undefined
+    }
+    if (session.inputSource.type === 'process') {
+      const pid = session.inputSource.pid || (session.inputSource.id ? parseInt(session.inputSource.id, 10) : undefined)
+      const api = typeof window !== 'undefined' ? (window as any).api : undefined
+      if (pid && api?.stopLoopbackCapture) {
+        api.stopLoopbackCapture(pid, session.trackId).catch(() => {})
+      }
+    }
+  }
+
+  /**
+   * Release all session resources and reset engine state.
+   */
+  private releaseAllResources(): void {
+    for (const session of this.sessions.values()) {
+      this.cleanupSession(session)
+    }
+    this.sessions.clear()
     if (this.loopbackCleanup) {
-      this.loopbackCleanup()
+      try {
+        this.loopbackCleanup()
+      } catch {}
       this.loopbackCleanup = undefined
     }
-
-    const results: RecordingResult[] = []
-
-    for (const session of this.sessions.values()) {
-      // 1. Release hardware stream
-      if (session.stream) {
-        session.stream.getTracks().forEach((track) => track.stop())
-        session.stream = undefined
-      }
-      if (session.sourceNode) {
-        session.sourceNode.disconnect()
-        session.sourceNode = undefined
-      }
-      if (session.workletNode) {
-        session.workletNode.disconnect()
-        session.workletNode = undefined
-      }
-
-      // 2. Stop WASAPI loopback if applicable
-      const api = typeof window !== 'undefined' ? (window as any).api : undefined
-      if (session.inputSource.type === 'process') {
-        const pid = session.inputSource.pid || (session.inputSource.id ? parseInt(session.inputSource.id, 10) : undefined)
-        if (pid && api?.stopLoopbackCapture) {
-          api.stopLoopbackCapture(pid).catch(() => {})
-        }
-      }
-
-      // 3. Flush remaining chunks
-      await this.flushSessionToDisk(session)
-
-      const duration = session.totalSamples / (session.sampleRate || 48000)
-
-      // 4. Finalize WAV file on disk
-      let finalFilePath = session.tempFilePath
-      if (api?.finalizeRecordingWav) {
-        const finRes = await api.finalizeRecordingWav(
-          session.trackId,
-          session.tempFilePath,
-          session.totalSamples,
-          session.sampleRate,
-          session.channels
-        )
-        if (finRes && finRes.filePath) {
-          finalFilePath = finRes.filePath
-        }
-      } else if (api?.saveRecording) {
-        // Complete buffer assemble & save fallback
-        const flatL = this.flattenChunks(session.chunksL, session.totalSamples)
-        const flatR = this.flattenChunks(session.chunksR, session.totalSamples)
-        const wavBuffer = this.encodeWAV([flatL, flatR], session.sampleRate, session.channels)
-        const saveRes = await api.saveRecording(session.tempFilePath, wavBuffer)
-        if (saveRes && saveRes.path) {
-          finalFilePath = saveRes.path
-        }
-      }
-
-      results.push({
-        trackId: session.trackId,
-        filePath: finalFilePath,
-        duration: Math.max(0, duration),
-        sampleRate: session.sampleRate,
-        totalSamples: session.totalSamples,
-        channels: session.channels,
-        peaks: session.recordedPeaks
-      })
-    }
-
-    this.sessions.clear()
-    return results
+    this.isRecordingState = false
+    this.isPausedState = false
   }
 
   /**

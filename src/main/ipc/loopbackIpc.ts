@@ -1,6 +1,11 @@
 import { ipcMain, desktopCapturer, BrowserWindow } from 'electron'
 import { exec } from 'child_process'
 import { logger } from '../logger'
+import {
+  resolveWindowProcessId,
+  startProcessLoopback,
+  stopProcessLoopback
+} from './processLoopback'
 
 export interface VisibleAppWindow {
   id: string
@@ -82,60 +87,75 @@ export function registerLoopbackIpc(): void {
         getRunningProcessMap().catch(() => new Map<string, { pid: number; name: string }>())
       ])
 
-      const windows: VisibleAppWindow[] = sources
-        .filter((source) => source.name && source.name.trim() !== '')
-        .map((source) => {
-          let detectedProcessName = 'Application.exe'
-          let detectedPid = 0
+      const pidToName = new Map<number, string>()
+      for (const info of processMap.values()) {
+        pidToName.set(info.pid, info.name)
+      }
 
-          // Try to extract PID from source id if present (format window:PID:index or window:HWND:index)
-          const idParts = source.id.split(':')
-          if (idParts.length >= 2) {
-            const rawId = parseInt(idParts[1], 10)
-            if (!isNaN(rawId)) {
-              detectedPid = rawId
+      const windows: VisibleAppWindow[] = await Promise.all(
+        sources
+          .filter((source) => source.name && source.name.trim() !== '')
+          .map(async (source) => {
+            let detectedProcessName = 'Application.exe'
+            let detectedPid = 0
+
+            // Extract window HWND handle from desktopCapturer source.id (format "window:HWND:index" or "window:HWND")
+            const idParts = source.id.split(':')
+            const hwndStr = idParts.length >= 2 ? idParts[1] : null
+
+            if (hwndStr && /^\d+$/.test(hwndStr) && hwndStr !== '0') {
+              try {
+                detectedPid = await resolveWindowProcessId(hwndStr)
+              } catch (err) {
+                logger.debug('Loopback', `Could not resolve PID for HWND ${hwndStr}:`, err)
+              }
             }
-          }
 
-          // Heuristic matching with running process map
-          const lowerTitle = source.name.toLowerCase()
-          for (const [procKey, procInfo] of processMap.entries()) {
-            const baseName = procKey.replace('.exe', '')
-            if (lowerTitle.includes(baseName) || baseName.includes(lowerTitle)) {
-              detectedProcessName = procInfo.name
-              detectedPid = procInfo.pid
-              break
-            }
-          }
-
-          // Common application title matches
-          if (detectedProcessName === 'Application.exe') {
-            if (lowerTitle.includes('spotify')) {
-              detectedProcessName = 'Spotify.exe'
-            } else if (lowerTitle.includes('discord')) {
-              detectedProcessName = 'Discord.exe'
-            } else if (lowerTitle.includes('chrome')) {
-              detectedProcessName = 'chrome.exe'
-            } else if (lowerTitle.includes('firefox')) {
-              detectedProcessName = 'firefox.exe'
-            } else if (lowerTitle.includes('edge')) {
-              detectedProcessName = 'msedge.exe'
+            // If PID was resolved, look up exact process name from running processes
+            if (detectedPid > 0 && pidToName.has(detectedPid)) {
+              detectedProcessName = pidToName.get(detectedPid)!
             } else {
-              detectedProcessName = `${source.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.exe`
+              // Heuristic fallback matching with running process map
+              const lowerTitle = source.name.toLowerCase()
+              for (const [procKey, procInfo] of processMap.entries()) {
+                const baseName = procKey.replace('.exe', '')
+                if (lowerTitle.includes(baseName) || baseName.includes(lowerTitle)) {
+                  detectedProcessName = procInfo.name
+                  if (detectedPid === 0) detectedPid = procInfo.pid
+                  break
+                }
+              }
+
+              // Common application title matches
+              if (detectedProcessName === 'Application.exe') {
+                if (lowerTitle.includes('spotify')) {
+                  detectedProcessName = 'Spotify.exe'
+                } else if (lowerTitle.includes('discord')) {
+                  detectedProcessName = 'Discord.exe'
+                } else if (lowerTitle.includes('chrome')) {
+                  detectedProcessName = 'chrome.exe'
+                } else if (lowerTitle.includes('firefox')) {
+                  detectedProcessName = 'firefox.exe'
+                } else if (lowerTitle.includes('edge')) {
+                  detectedProcessName = 'msedge.exe'
+                } else {
+                  detectedProcessName = `${source.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.exe`
+                }
+              }
             }
-          }
 
-          const iconUrl = source.appIcon ? source.appIcon.toDataURL() : undefined
+            const iconUrl = source.appIcon ? source.appIcon.toDataURL() : undefined
 
-          return {
-            id: source.id,
-            title: source.name,
-            name: source.name,
-            processName: detectedProcessName,
-            pid: detectedPid,
-            iconUrl
-          }
-        })
+            return {
+              id: source.id,
+              title: source.name,
+              name: source.name,
+              processName: detectedProcessName,
+              pid: detectedPid,
+              iconUrl
+            }
+          })
+      )
 
       logger.debug('Loopback', `${windows.length} sichtbare Fenster gefunden`)
       return windows
@@ -198,50 +218,43 @@ export function registerLoopbackIpc(): void {
   })
 
   // Start loopback capture for a specific PID and track
-  ipcMain.handle('start-loopback-capture', (event, pid: number, trackId?: string) => {
+  ipcMain.handle('start-loopback-capture', async (event, pid: number, trackId?: string) => {
     logger.info('Loopback', `Starte Loopback-Erfassung für PID ${pid} (Spur: ${trackId})`)
-    const targetWebContents = event.sender
-    const key = `loopback_${pid}`
-    if (monitoredProcesses.has(key)) {
-      clearInterval(monitoredProcesses.get(key)!.interval)
-    }
-    let wasAlive = true
-    const interval = setInterval(async () => {
-      const isAlive = await checkProcessAlive(pid)
-      if (wasAlive && !isAlive) {
-        wasAlive = false
-        if (!targetWebContents.isDestroyed()) {
-          targetWebContents.send('loopback:process-status', {
-            pid,
-            processName: `PID ${pid}`,
-            status: 'closed'
-          })
-        }
-      } else if (!wasAlive && isAlive) {
-        wasAlive = true
-        if (!targetWebContents.isDestroyed()) {
-          targetWebContents.send('loopback:process-status', {
-            pid,
-            processName: `PID ${pid}`,
-            status: 'reconnected'
-          })
-        }
+    if (!trackId || typeof trackId !== 'string') {
+      return {
+        success: false,
+        error: 'Ungültige Spur-ID für Loopback-Erfassung',
+        unsupported: false
       }
-    }, 2000)
-    monitoredProcesses.set(key, { pid, processName: `PID ${pid}`, interval })
-    return { success: true }
+    }
+
+    try {
+      const result = await startProcessLoopback(pid, trackId, event.sender)
+      return result
+    } catch (err: any) {
+      const msg = err?.message || 'WASAPI Loopback capture failed'
+      const isUnsupported =
+        msg.includes('Windows build 20348 or higher required') ||
+        msg.includes('only supported on Windows') ||
+        msg.includes('not supported')
+      logger.warn('Loopback', `Loopback nicht unterstützt oder fehlgeschlagen für PID ${pid} (Spur: ${trackId}): ${msg}`)
+      return {
+        success: false,
+        error: msg,
+        unsupported: isUnsupported
+      }
+    }
   })
 
   // Stop loopback capture
-  ipcMain.handle('stop-loopback-capture', (_, pid: number) => {
-    logger.info('Loopback', `Stoppe Loopback-Erfassung für PID ${pid}`)
-    const key = `loopback_${pid}`
-    const entry = monitoredProcesses.get(key)
-    if (entry) {
-      clearInterval(entry.interval)
-      monitoredProcesses.delete(key)
+  ipcMain.handle('stop-loopback-capture', async (_, pid: number, trackId?: string) => {
+    logger.info('Loopback', `Stoppe Loopback-Erfassung für PID ${pid} (Spur: ${trackId})`)
+    try {
+      return await stopProcessLoopback(pid, trackId)
+    } catch (err: any) {
+      logger.warn('Loopback', `Fehler beim Stoppen von Loopback: ${err.message}`)
+      return { success: false, error: err.message }
     }
-    return { success: true }
   })
 
   // Check if process is alive once

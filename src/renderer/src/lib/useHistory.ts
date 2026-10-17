@@ -33,14 +33,20 @@ export function deepClone<T>(val: T): T {
  * Imperative HistoryStack class for non-react or headless state management.
  */
 export class HistoryStack<T> {
-  private past: T[] = []
+  private past: { state: T; id: number }[] = []
   private present: T
-  private future: T[] = []
+  private presentId: number = 0
+  private future: { state: T; id: number }[] = []
   private readonly maxDepth: number
+  private nextId: number = 1
+  private cleanId: number = 0
 
   constructor(initialPresent: T, maxDepth: number = MAX_HISTORY_STEPS) {
     this.present = deepClone(initialPresent)
     this.maxDepth = maxDepth
+    this.presentId = 0
+    this.cleanId = 0
+    this.nextId = 1
   }
 
   public get state(): T {
@@ -59,6 +65,15 @@ export class HistoryStack<T> {
     return this.past.length
   }
 
+  public get isModified(): boolean {
+    return this.presentId !== this.cleanId
+  }
+
+  public markClean(savedState: T = this.present): void {
+    if (savedState !== this.present) return
+    this.cleanId = this.presentId
+  }
+
   /**
    * Pushes a new snapshot to the history stack.
    * If history exceeds maxDepth (50 steps), oldest item is evicted.
@@ -66,12 +81,24 @@ export class HistoryStack<T> {
    */
   public push(newState: T): void {
     // Clone present to past
-    this.past.push(deepClone(this.present))
+    this.past.push({ state: deepClone(this.present), id: this.presentId })
     if (this.past.length > this.maxDepth) {
       this.past.shift()
     }
     this.present = deepClone(newState)
+    this.presentId = this.nextId++
     this.future = []
+  }
+
+  /**
+   * Updates present state without pushing to past (useful for continuous/transient edits).
+   */
+  public setPresent(newState: T, markAsModified: boolean = false): void {
+    this.present = deepClone(newState)
+    if (markAsModified) {
+      this.presentId = this.nextId++
+      this.future = []
+    }
   }
 
   /**
@@ -81,8 +108,9 @@ export class HistoryStack<T> {
     if (!this.canUndo) return null
 
     const previous = this.past.pop()!
-    this.future.unshift(deepClone(this.present))
-    this.present = previous
+    this.future.unshift({ state: deepClone(this.present), id: this.presentId })
+    this.present = previous.state
+    this.presentId = previous.id
     return deepClone(this.present)
   }
 
@@ -93,13 +121,14 @@ export class HistoryStack<T> {
     if (!this.canRedo) return null
 
     const next = this.future.shift()!
-    this.past.push(deepClone(this.present))
-    this.present = next
+    this.past.push({ state: deepClone(this.present), id: this.presentId })
+    this.present = next.state
+    this.presentId = next.id
     return deepClone(this.present)
   }
 
   /**
-   * Clears the history and resets present.
+   * Clears the history and resets present to an isolated initial state.
    */
   public clear(newPresent?: T): void {
     this.past = []
@@ -107,17 +136,23 @@ export class HistoryStack<T> {
     if (newPresent !== undefined) {
       this.present = deepClone(newPresent)
     }
+    this.presentId = 0
+    this.cleanId = 0
+    this.nextId = 1
   }
 }
 
 export interface UseHistoryReturn<T> {
   state: T
   set: (newState: T | ((prev: T) => T)) => void
-  undo: () => void
-  redo: () => void
+  setPresent: (newState: T | ((prev: T) => T), markModified?: boolean) => void
+  undo: () => T | null
+  redo: () => T | null
   canUndo: boolean
   canRedo: boolean
   clear: (initialState?: T) => void
+  markClean: (savedState?: T) => void
+  isModified: boolean
   historyCount: number
 }
 
@@ -152,18 +187,31 @@ export function useHistory<T>(
     [triggerUpdate]
   )
 
+  const setPresent = useCallback(
+    (newState: T | ((prev: T) => T), markModified?: boolean) => {
+      const resolved = typeof newState === 'function' ? (newState as any)(stackRef.current.state) : newState
+      stackRef.current.setPresent(resolved, markModified)
+      triggerUpdate()
+    },
+    [triggerUpdate]
+  )
+
   const undo = useCallback(() => {
     if (stackRef.current.canUndo) {
-      stackRef.current.undo()
+      const res = stackRef.current.undo()
       triggerUpdate()
+      return res
     }
+    return null
   }, [triggerUpdate])
 
   const redo = useCallback(() => {
     if (stackRef.current.canRedo) {
-      stackRef.current.redo()
+      const res = stackRef.current.redo()
       triggerUpdate()
+      return res
     }
+    return null
   }, [triggerUpdate])
 
   const clear = useCallback(
@@ -173,6 +221,11 @@ export function useHistory<T>(
     },
     [triggerUpdate]
   )
+
+  const markClean = useCallback((savedState?: T) => {
+    stackRef.current.markClean(savedState)
+    triggerUpdate()
+  }, [triggerUpdate])
 
   // Global Keyboard Shortcuts (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z)
   useEffect(() => {
@@ -209,11 +262,14 @@ export function useHistory<T>(
   return {
     state,
     set,
+    setPresent,
     undo,
     redo,
     canUndo: stackRef.current.canUndo,
     canRedo: stackRef.current.canRedo,
     clear,
+    markClean,
+    isModified: stackRef.current.isModified,
     historyCount: stackRef.current.historyLength
   }
 }
