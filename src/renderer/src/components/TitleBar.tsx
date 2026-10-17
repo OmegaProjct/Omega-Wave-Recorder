@@ -16,7 +16,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   isModified = false,
   viewMode,
   onToggleViewMode,
-  version = '0.1.1'
+  version = '0.1.2'
 }) => {
   const { t } = useTranslation()
   const [appVersion, setAppVersion] = useState(version)

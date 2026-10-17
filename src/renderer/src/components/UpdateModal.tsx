@@ -16,11 +16,28 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
   const [status, setStatus] = useState<
     'checking' | 'up-to-date' | 'available' | 'downloading' | 'ready' | 'error'
   >('checking')
-  const [currentVersion, setCurrentVersion] = useState('0.1.1')
+  const [currentVersion, setCurrentVersion] = useState('0.1.2')
   const [newVersion, setNewVersion] = useState<string | null>(null)
+  const [downloadUrl, setDownloadUrl] = useState<string>('')
   const [releaseNotes, setReleaseNotes] = useState<string>('')
   const [downloadProgress, setDownloadProgress] = useState(0)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (window.api?.onDownloadProgress) {
+      const unsub = window.api.onDownloadProgress((data: any) => {
+        setDownloadProgress(data.percent || 0)
+        if (data.status === 'completed' || data.percent >= 100) {
+          setStatus('ready')
+        } else if (data.status === 'error') {
+          setErrorMessage(data.error || 'Fehler beim Herunterladen des Updates.')
+          setStatus('error')
+        }
+      })
+      return () => unsub()
+    }
+    return undefined
+  }, [])
 
   useEffect(() => {
     async function check() {
@@ -33,9 +50,10 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
 
         if (window.api?.checkForUpdates) {
           const res = await window.api.checkForUpdates()
-          if (res?.updateAvailable) {
-            setNewVersion(res.version)
-            setReleaseNotes(res.releaseNotes || 'Verbesserungen und Fehlerbehebungen.')
+          if (res?.available || res?.updateAvailable) {
+            setNewVersion((res.latestVersion || res.version || '').replace(/^v/, ''))
+            setReleaseNotes(res.releaseNotes || res.body || 'Verbesserungen und Fehlerbehebungen.')
+            if (res.downloadUrl) setDownloadUrl(res.downloadUrl)
             setStatus('available')
             return
           }
@@ -54,14 +72,21 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
 
   const handleDownload = async () => {
     setStatus('downloading')
-    setDownloadProgress(10)
+    setDownloadProgress(0)
 
     try {
-      if (window.api?.downloadUpdate) {
-        await window.api.downloadUpdate()
+      if (window.api?.startUpdateDownload) {
+        const res = await window.api.startUpdateDownload({ url: downloadUrl, latestVersion: newVersion || undefined })
+        if (res?.success) {
+          setStatus('ready')
+        } else if (res?.error && res.error !== 'Canceled') {
+          throw new Error(res.error)
+        }
+      } else if (window.api?.downloadUpdate) {
+        await window.api.downloadUpdate({ url: downloadUrl, latestVersion: newVersion || undefined })
         setStatus('ready')
       } else {
-        // Simulated progress if not connected
+        // Fallback simulation
         const interval = setInterval(() => {
           setDownloadProgress((prev) => {
             if (prev >= 100) {

@@ -213,11 +213,14 @@ export function setupUpdateDownloader(mainWindow?: BrowserWindow | null): void {
 
       return {
         available: updateAvailable,
+        updateAvailable,
         currentVersion,
+        version: latestRelease.tag_name || latestVersion,
         latestVersion: latestRelease.tag_name || latestVersion,
         url: latestRelease.html_url || 'https://github.com/OmegaProjct/Omega-Wave-Recorder/releases',
         downloadUrl,
-        body: latestRelease.body || 'Keine Versionshinweise verfügbar.'
+        body: latestRelease.body || 'Keine Versionshinweise verfügbar.',
+        releaseNotes: latestRelease.body || 'Keine Versionshinweise verfügbar.'
       }
     } catch (err: any) {
       logger.error('Updater', 'Fehler bei der Update-Prüfung', err)

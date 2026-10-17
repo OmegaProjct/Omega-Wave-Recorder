@@ -44,7 +44,7 @@ Get the latest stable release of **Omega Wave Recorder** directly from our [Rele
 
 | Operating System | Recommended Installer | Standalone / Portable |
 | :--- | :--- | :--- |
-| **🪟 Windows 10 / 11** (x64) | [**Download Setup (.exe)**](https://github.com/OmegaProjct/Omega-Wave-Recorder/releases/latest/download/Omega-Wave-Recorder-Setup-0.1.1.exe) | [**Download Portable (.exe)**](https://github.com/OmegaProjct/Omega-Wave-Recorder/releases/latest/download/Omega-Wave-Recorder-Portable-0.1.1.exe) |
+| **🪟 Windows 10 / 11** (x64) | [**Download Setup (.exe)**](https://github.com/OmegaProjct/Omega-Wave-Recorder/releases/latest/download/Omega-Wave-Recorder-Setup-0.1.2.exe) | [**Download Portable (.exe)**](https://github.com/OmegaProjct/Omega-Wave-Recorder/releases/latest/download/Omega-Wave-Recorder-Portable-0.1.2.exe) |
 
 ---
 

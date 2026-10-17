@@ -2,6 +2,18 @@
 
 The format is based on Keep a Changelog. Dieses Projekt nutzt das klassische Semantic Versioning (`X.Y.Z`).
 
+## [0.1.2] - 2026-10-18
+
+### Deutsch
+
+#### 🐛 Behoben & Verbessert
+- **Interner Software-Updater**: IPC-Schnittstelle zwischen Update-Dialog und Electron-Hauptprozess repariert (`available`, `version`, `releaseNotes`, `downloadUrl`). Der Updater erkennt neue Releases nun zuverlässig, lädt das Setup mit Live-Fortschrittsbalken herunter und startet die Installation auf Knopfdruck.
+
+### English
+
+#### 🐛 Fixed & Improved
+- **Internal Software Updater**: Fixed IPC contract between update dialog and Electron main process (`available`, `version`, `releaseNotes`, `downloadUrl`). The updater now reliably detects new GitHub releases, downloads setup with real progress, and triggers installation.
+
 ## [0.1.1] - 2026-10-18
 
 ### Deutsch

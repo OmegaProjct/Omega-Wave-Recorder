@@ -116,6 +116,10 @@ const api = {
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   startUpdateDownload: (payload: { url?: string; latestVersion?: string }) =>
     ipcRenderer.invoke('start-update-download', payload),
+  downloadUpdate: (payload?: string | { url?: string; latestVersion?: string }) => {
+    const p = typeof payload === 'string' ? { url: payload } : (payload || {})
+    return ipcRenderer.invoke('start-update-download', p)
+  },
   cancelUpdateDownload: () => ipcRenderer.invoke('cancel-update-download'),
   installUpdate: (payload: { installNow?: boolean }) => ipcRenderer.invoke('install-update', payload),
   onDownloadProgress: (callback: (data: UpdateDownloadProgress) => void) => {
@@ -148,7 +152,6 @@ const api = {
   getAvailableLocales: () => ipcRenderer.invoke('get-available-locales'),
   openLocalesFolder: () => ipcRenderer.invoke('open-locales-folder'),
   exportAudio: (settings: any) => ipcRenderer.invoke('export-project', [], settings.path, settings.id3Tags),
-  downloadUpdate: (url?: string) => ipcRenderer.invoke('start-update-download', { url }),
 
   // Real-time chunk streaming & loopback capture for AudioRecordingEngine
   startLoopbackCapture: (pid: number, trackId?: string) =>
