@@ -66,17 +66,18 @@ let mainWindow: BrowserWindow | null = null
 function createMainWindow(): BrowserWindow {
   ensureDirectoryStructure()
 
-  const iconPath = join(__dirname, '../../assets/app_icon.png')
-  const fallbackIconPath = join(__dirname, '../../assets/logo.png')
+  const appRoot = app.getAppPath()
+  const iconPath = join(appRoot, 'assets', 'app_icon.png')
+  const fallbackIconPath = join(appRoot, 'assets', 'logo.png')
   const icon = fs.existsSync(iconPath) ? iconPath : fs.existsSync(fallbackIconPath) ? fallbackIconPath : undefined
 
   mainWindow = new BrowserWindow({
-    width: 620,
-    height: 340,
-    minWidth: 480,
-    minHeight: 280,
+    width: 920,
+    height: 580,
+    minWidth: 520,
+    minHeight: 340,
+    center: true,
     frame: false,
-    titleBarStyle: 'hidden',
     backgroundColor: '#1a1d21',
     show: false,
     autoHideMenuBar: true,
@@ -98,10 +99,28 @@ function createMainWindow(): BrowserWindow {
   registerProjectIpc()
   setupUpdateDownloader(mainWindow)
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow?.show()
-    logger.info('System', 'Hauptfenster wird angezeigt')
+  mainWindow.once('ready-to-show', () => {
+    if (mainWindow) {
+      mainWindow.center()
+      mainWindow.show()
+      mainWindow.setAlwaysOnTop(true)
+      mainWindow.focus()
+      mainWindow.setAlwaysOnTop(false)
+      logger.info('System', 'Hauptfenster wird zentriert angezeigt und in den Vordergrund geholt')
+    }
   })
+
+  // Safety fallback timeout ensuring window is displayed
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isVisible()) {
+      mainWindow.center()
+      mainWindow.show()
+      mainWindow.setAlwaysOnTop(true)
+      mainWindow.focus()
+      mainWindow.setAlwaysOnTop(false)
+      logger.info('System', 'Hauptfenster über Timeout forciert angezeigt')
+    }
+  }, 1200)
 
   mainWindow.on('closed', () => {
     mainWindow = null
