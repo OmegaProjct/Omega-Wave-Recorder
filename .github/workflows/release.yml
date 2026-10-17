@@ -6,8 +6,32 @@ on:
       - 'v*'
 
 jobs:
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Release-Bereinigung & Entwurf erstellen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ github.ref_name }}"
+          echo "Suche nach existierenden Releases für Tag $tag..."
+          
+          # Bestehende Releases/Drafts für diesen Tag löschen
+          release_ids=$(gh api repos/${{ github.repository }}/releases --jq ".[] | select(.tag_name == \"$tag\") | .id")
+          for id in $release_ids; do
+            echo "Lösche existierendes Release/Draft ID $id..."
+            gh api -X DELETE repos/${{ github.repository }}/releases/$id
+          done
+          
+          echo "Erstelle neuen Entwurf (Draft) für $tag..."
+          gh api -X POST repos/${{ github.repository }}/releases -f tag_name="$tag" -f name="$tag" -F draft=true
+
   publish:
     name: Build & Publish Release on ${{ matrix.os }}
+    needs: prepare
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -43,7 +67,7 @@ jobs:
 
   publish-release:
     name: Release veröffentlichen
-    needs: publish
+    needs: [prepare, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
