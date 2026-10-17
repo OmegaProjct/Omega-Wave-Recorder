@@ -221,6 +221,12 @@ Jede der 4 Spuren besitzt:
     * Felder: Titel, Interpret, Album, Jahr, Genre, Kommentar, Track-Nummer.
     * Cover-Art-Auswahl (Bildpfad zu JPG/PNG, wird via FFmpeg eingebettet).
 * **`SettingsModal.tsx`:**
+  * *Reiter Sprache & Internationalisierung (i18n):*
+    * Dropdown-Menü zur Sprachauswahl (Standard: Deutsch & English).
+    * Erkennt automatisch alle weiteren `.json`-Dateien im Ordner `Locales/`.
+    * Sofortige Umschaltung zur Laufzeit ohne Neustart via `i18next.changeLanguage()`.
+    * Button: *„Sprachordner im Explorer öffnen“* (ermöglicht Nutzern das unkomplizierte Hinzufügen eigener Sprachen wie Französisch, Spanisch, Japanisch etc.).
+    * Automatische Erstellung von `custom_example.json` als leicht verständliche Übersetzungsvorlage.
   * *Reiter Audio:* Standard-Samplerate, Standard-Audioausgang, Standard-Speicherpfade.
   * *Reiter Meldungen & Warnungen:*
     * Zeigt alle stummgeschalteten Hinweise (z. B. *"Warnung bei geschlossenem Programm"*).
