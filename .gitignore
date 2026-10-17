@@ -8,6 +8,7 @@ dist-bin/
 .vite/
 
 # IDE and System files
+.github/
 .DS_Store
 .idea/
 .vscode/

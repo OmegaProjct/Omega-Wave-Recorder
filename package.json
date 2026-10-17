@@ -15,7 +15,8 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run build"
+    "test": "npx tsx scripts/verify-core-logic.ts",
+    "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "clsx": "^2.1.1",

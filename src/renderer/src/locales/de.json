@@ -1,0 +1,113 @@
+{
+  "app": {
+    "title": "Omega Wave Recorder",
+    "untitled": "Unbenannt.owrp"
+  },
+  "menu": {
+    "file": "Datei",
+    "new_project": "Neues Projekt",
+    "open_project": "Projekt öffnen...",
+    "save_project": "Projekt speichern",
+    "save_project_as": "Speichern unter...",
+    "export_audio": "Audio exportieren...",
+    "settings": "Einstellungen",
+    "quit": "Beenden",
+    "edit": "Bearbeiten",
+    "undo": "Rückgängig",
+    "redo": "Wiederherstellen",
+    "cut_range": "Bereich schneiden",
+    "delete_before": "Vor Abspielposition löschen",
+    "delete_after": "Nach Abspielposition löschen",
+    "delete_selection": "Löschen",
+    "help": "Hilfe",
+    "manual": "Benutzerhandbuch",
+    "changelog": "Changelog",
+    "check_updates": "Auf Updates prüfen",
+    "show_logs": "Logs anzeigen",
+    "send_feedback": "Feedback senden",
+    "message_center": "Nachrichtencenter",
+    "about": "Über Omega Wave Recorder",
+    "support_paypal": "Projekt unterstützen (PayPal)"
+  },
+  "transport": {
+    "to_start": "Zum Anfang",
+    "back_1s": "-1s zurück",
+    "play": "Wiedergabe",
+    "pause": "Pause",
+    "stop": "Stopp",
+    "forward_1s": "+1s vor",
+    "to_end": "Zum Ende",
+    "record": "Aufnahme",
+    "recording": "Aufnahme läuft",
+    "append_mode": "Ans Ende anfügen",
+    "cursor_mode": "Ab Cursor aufnehmen",
+    "output_device": "Audioausgang",
+    "system_default": "Systemstandard"
+  },
+  "track": {
+    "track": "Spur",
+    "arm": "Scharfschalten",
+    "mute": "Stumm",
+    "solo": "Solo",
+    "gain": "Pegel",
+    "select_input": "Eingangsquelle wählen",
+    "hardware_devices": "Hardware & Audiogeräte",
+    "running_programs": "Laufende Programme (WASAPI)",
+    "no_input": "Kein Eingang",
+    "no_audio": "Keine Audiodaten",
+    "recording_active": "Live-Aufzeichnung...",
+    "drop_audio": "Audiodatei hier ablegen"
+  },
+  "hybrid": {
+    "multitrack": "Multi-Track Ansicht (4 Spuren)",
+    "focus": "Retro-Einzelspur Fokusansicht",
+    "switch_track": "Spur wechseln:"
+  },
+  "export": {
+    "title": "Audio Exportieren",
+    "format": "Format",
+    "mode": "Export-Modus",
+    "mixdown": "Master-Mixdown (alle Spuren)",
+    "stems": "Einzelspuren (Stems exportieren)",
+    "sample_rate": "Samplerate",
+    "bitrate": "Bitrate",
+    "channels": "Kanäle",
+    "id3_tags": "ID3-Metadaten & Tags",
+    "tag_title": "Titel",
+    "tag_artist": "Künstler",
+    "tag_album": "Album",
+    "tag_year": "Jahr",
+    "tag_genre": "Genre",
+    "tag_comment": "Kommentar",
+    "tag_track": "Track-Nr.",
+    "cover_art": "Cover-Bild (JPG / PNG)",
+    "select_cover": "Cover auswählen...",
+    "export_btn": "Jetzt exportieren",
+    "cancel": "Abbrechen"
+  },
+  "settings": {
+    "title": "Programmeinstellungen",
+    "tab_audio": "Audio",
+    "tab_language": "Sprache",
+    "tab_notifications": "Meldungen & Warnungen",
+    "sample_rate": "Standard-Samplerate",
+    "output_device": "Standard-Ausgabegerät",
+    "open_locales_dir": "Sprachordner im Explorer öffnen",
+    "available_languages": "Verfügbare Sprachen",
+    "silenced_warnings": "Stummgeschaltete Warnungen & Hinweise",
+    "reset_all_warnings": "Alle Hinweise zurücksetzen",
+    "no_silenced_warnings": "Zurzeit sind keine Hinweise stummgeschaltet.",
+    "save": "Speichern",
+    "close": "Schließen"
+  },
+  "about": {
+    "title": "Über Omega Wave Recorder",
+    "description": "Schlanker, latenzarmer Mehrspur-Audiorecorder der Omega Media Core Suite für Windows. Spezialisiert auf Studio-Mikrofone, direkte Hardware-Inputs und isolierte OBS-Style Prozess-Aufnahmen (z. B. Spotify, Discord, Games).",
+    "open_github": "GitHub Repository öffnen",
+    "support_paypal": "Projekt unterstützen (PayPal)",
+    "contact_support": "Support kontaktieren"
+  },
+  "manual": {
+    "title": "Omega Wave Recorder – Benutzerhandbuch"
+  }
+}

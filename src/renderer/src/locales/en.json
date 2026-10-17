@@ -1,0 +1,113 @@
+{
+  "app": {
+    "title": "Omega Wave Recorder",
+    "untitled": "Untitled.owrp"
+  },
+  "menu": {
+    "file": "File",
+    "new_project": "New Project",
+    "open_project": "Open Project...",
+    "save_project": "Save Project",
+    "save_project_as": "Save As...",
+    "export_audio": "Export Audio...",
+    "settings": "Settings",
+    "quit": "Exit",
+    "edit": "Edit",
+    "undo": "Undo",
+    "redo": "Redo",
+    "cut_range": "Cut Range",
+    "delete_before": "Delete Before Playhead",
+    "delete_after": "Delete After Playhead",
+    "delete_selection": "Delete",
+    "help": "Help",
+    "manual": "User Manual",
+    "changelog": "Changelog",
+    "check_updates": "Check for Updates",
+    "show_logs": "Show Logs",
+    "send_feedback": "Send Feedback",
+    "message_center": "Message Center",
+    "about": "About Omega Wave Recorder",
+    "support_paypal": "Support Project (PayPal)"
+  },
+  "transport": {
+    "to_start": "To Start",
+    "back_1s": "-1s Back",
+    "play": "Play",
+    "pause": "Pause",
+    "stop": "Stop",
+    "forward_1s": "+1s Forward",
+    "to_end": "To End",
+    "record": "Record",
+    "recording": "Recording Active",
+    "append_mode": "Append to End",
+    "cursor_mode": "Record at Cursor",
+    "output_device": "Audio Output",
+    "system_default": "System Default"
+  },
+  "track": {
+    "track": "Track",
+    "arm": "Arm",
+    "mute": "Mute",
+    "solo": "Solo",
+    "gain": "Gain",
+    "select_input": "Select Input Source",
+    "hardware_devices": "Hardware & Audio Devices",
+    "running_programs": "Running Applications (WASAPI)",
+    "no_input": "No Input",
+    "no_audio": "No Audio Data",
+    "recording_active": "Live Recording...",
+    "drop_audio": "Drop audio file here"
+  },
+  "hybrid": {
+    "multitrack": "Multi-Track View (4 Tracks)",
+    "focus": "Retro Single-Track Focus View",
+    "switch_track": "Switch track:"
+  },
+  "export": {
+    "title": "Export Audio",
+    "format": "Format",
+    "mode": "Export Mode",
+    "mixdown": "Master Mixdown (All Tracks)",
+    "stems": "Single Tracks (Export Stems)",
+    "sample_rate": "Sample Rate",
+    "bitrate": "Bitrate",
+    "channels": "Channels",
+    "id3_tags": "ID3 Metadata & Tags",
+    "tag_title": "Title",
+    "tag_artist": "Artist",
+    "tag_album": "Album",
+    "tag_year": "Year",
+    "tag_genre": "Genre",
+    "tag_comment": "Comment",
+    "tag_track": "Track No.",
+    "cover_art": "Cover Art (JPG / PNG)",
+    "select_cover": "Select Cover...",
+    "export_btn": "Export Now",
+    "cancel": "Cancel"
+  },
+  "settings": {
+    "title": "Application Settings",
+    "tab_audio": "Audio",
+    "tab_language": "Language",
+    "tab_notifications": "Notifications & Warnings",
+    "sample_rate": "Default Sample Rate",
+    "output_device": "Default Output Device",
+    "open_locales_dir": "Open Locales Folder in Explorer",
+    "available_languages": "Available Languages",
+    "silenced_warnings": "Silenced Notifications & Warnings",
+    "reset_all_warnings": "Reset All Warnings",
+    "no_silenced_warnings": "Currently no notifications are silenced.",
+    "save": "Save",
+    "close": "Close"
+  },
+  "about": {
+    "title": "About Omega Wave Recorder",
+    "description": "Lean, low-latency multi-track audio recorder in the Omega Media Core suite for Windows. Specialized in studio microphones, direct hardware inputs, and isolated OBS-style process loopback recording (e.g. Spotify, Discord, Games).",
+    "open_github": "Open GitHub Repository",
+    "support_paypal": "Support Project (PayPal)",
+    "contact_support": "Contact Support"
+  },
+  "manual": {
+    "title": "Omega Wave Recorder – User Manual"
+  }
+}
