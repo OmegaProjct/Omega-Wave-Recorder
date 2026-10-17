@@ -9,7 +9,7 @@ interface AboutModalProps {
 
 export const AboutModal: React.FC<AboutModalProps> = ({ onClose }) => {
   const { t } = useTranslation()
-  const [version, setVersion] = useState('0.1.0')
+  const [version, setVersion] = useState('0.1.1')
 
   useEffect(() => {
     async function loadVersion() {
@@ -80,7 +80,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ onClose }) => {
           <p className="text-xs text-gray-300 leading-relaxed mb-6 px-3">
             {t(
               'about.description',
-              'Schlanker, latenzarmer Mehrspur-Audiorecorder der Omega Media Core Suite für Windows. Spezialisiert auf Studio-Mikrofone, direkte Hardware-Inputs und isolierte OBS-Style Prozess-Aufnahmen (z. B. Spotify, Discord, Games).'
+              'Schlanker, latenzarmer Mehrspur-Audiorecorder der Omega Media Core Suite für Windows. Spezialisiert auf Studio-Mikrofone, direkte Hardware-Inputs und isolierte Windows-Prozess-Aufnahmen (z. B. Spotify, Discord, Games).'
             )}
           </p>
 

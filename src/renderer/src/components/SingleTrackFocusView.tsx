@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Mic,
   Monitor,
@@ -58,6 +59,7 @@ export const SingleTrackFocusView: React.FC<SingleTrackFocusViewProps> = ({
   onInputChange,
   onSeek
 }) => {
+  const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -230,14 +232,14 @@ export const SingleTrackFocusView: React.FC<SingleTrackFocusViewProps> = ({
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] font-mono text-gray-400 mr-1 flex items-center gap-1">
             <Activity size={13} className="text-omega-accent" />
-            Spur Fokus:
+            {t('track.focus_title', 'Spur Fokus:')}
           </span>
-          {tracks.map((t, idx) => {
+          {tracks.map((tTrack, idx) => {
             const isSelected = idx === activeTrackIndex
-            const isTrackArmed = armedTrackIds.has(t.id)
+            const isTrackArmed = armedTrackIds.has(tTrack.id)
             return (
               <button
-                key={t.id}
+                key={tTrack.id}
                 onClick={() => onSelectTrack(idx)}
                 className={`px-3 py-1 rounded-md text-xs font-bold border transition-all duration-150 active:scale-[0.97] flex items-center gap-1.5 ${
                   isSelected
@@ -245,7 +247,7 @@ export const SingleTrackFocusView: React.FC<SingleTrackFocusViewProps> = ({
                     : 'bg-[#202328] hover:bg-[#2b2f36] border-gray-700/60 text-gray-400 hover:text-white'
                 }`}
               >
-                <span>Spur {idx + 1}</span>
+                <span>{tTrack.name || `${t('track.track', 'Spur')} ${idx + 1}`}</span>
                 {isTrackArmed && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />}
               </button>
             )
@@ -256,10 +258,10 @@ export const SingleTrackFocusView: React.FC<SingleTrackFocusViewProps> = ({
         <div className="flex items-center gap-2 font-mono text-xs">
           <span className="px-2 py-0.5 rounded bg-[#101c15] border border-emerald-900/60 text-emerald-400 text-[10px] font-bold tracking-wider">
             {isRecording && isArmed
-              ? '● LIVE REC'
+              ? t('track.live_rec', '● LIVE REC')
               : isPlaying
-              ? '▶ PLAY'
-              : 'BEREIT'}
+              ? t('track.play_active', '▶ PLAY')
+              : t('track.ready', 'BEREIT')}
           </span>
           <span className="text-gray-400 text-xs font-mono">
             {formatRetroTime(currentTime)} / {formatRetroTime(totalDuration)}
@@ -318,7 +320,7 @@ export const SingleTrackFocusView: React.FC<SingleTrackFocusViewProps> = ({
                 : 'bg-[#181a1e] border-gray-700 text-gray-400'
             }`}
           >
-            [● R] Arm
+            [● R] {t('track.arm', 'Arm')}
           </button>
           <button
             onClick={() => onToggleMute(activeTrack.id)}
@@ -328,7 +330,7 @@ export const SingleTrackFocusView: React.FC<SingleTrackFocusViewProps> = ({
                 : 'bg-[#181a1e] border-gray-700 text-gray-400'
             }`}
           >
-            [M] Mute
+            [M] {t('track.mute', 'Mute')}
           </button>
           <button
             onClick={() => onToggleSolo(activeTrack.id)}
@@ -338,7 +340,7 @@ export const SingleTrackFocusView: React.FC<SingleTrackFocusViewProps> = ({
                 : 'bg-[#181a1e] border-gray-700 text-gray-400'
             }`}
           >
-            [S] Solo
+            [S] {t('track.solo', 'Solo')}
           </button>
 
           {/* Volume Slider */}

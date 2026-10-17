@@ -18,12 +18,19 @@ import UpdateModal from './components/UpdateModal'
 
 import type {
   Track,
+  Region,
   InputSource,
   LivePeak,
   AudioProcessInfo,
   Project,
   ExportSettings
 } from '../../common/types'
+import {
+  AudioRecordingEngine,
+  type RecordingTrackConfig,
+  type RecordingResult
+} from './lib/AudioRecordingEngine'
+import { AudioPlaybackEngine } from './lib/AudioPlaybackEngine'
 
 const INITIAL_TRACKS: Track[] = [
   {
@@ -35,7 +42,7 @@ const INITIAL_TRACKS: Track[] = [
     locked: false,
     visible: true,
     volume: 1.0,
-    height: 105,
+    height: 74,
     inputSource: {
       type: 'device',
       id: 'default',
@@ -43,80 +50,62 @@ const INITIAL_TRACKS: Track[] = [
       name: 'Mikrofon (Systemstandard)',
       label: 'Mikrofon (Systemstandard)'
     },
-    regions: [
-      {
-        id: 'reg-1',
-        name: 'Take 01 - Intro',
-        file: { path: 'take_01.wav', name: 'take_01.wav' },
-        startPos: 1.0,
-        duration: 9.5,
-        gain: 1.0
-      }
-    ]
+    regions: []
   },
   {
     id: 'track-2',
     index: 1,
-    name: 'Spur 2 - Spotify (WASAPI)',
-    muted: false,
-    solo: false,
-    locked: false,
-    visible: true,
-    volume: 0.85,
-    height: 105,
-    inputSource: {
-      type: 'process',
-      id: 'spotify',
-      processName: 'Spotify.exe',
-      name: 'Spotify Music',
-      label: 'Spotify (Spotify.exe)'
-    },
-    regions: [
-      {
-        id: 'reg-2',
-        name: 'Background Music',
-        file: { path: 'take_spotify.wav', name: 'take_spotify.wav' },
-        startPos: 0.0,
-        duration: 18.0,
-        gain: 0.8
-      }
-    ]
-  },
-  {
-    id: 'track-3',
-    index: 2,
-    name: 'Spur 3 - Discord / Chat',
+    name: 'Spur 2',
     muted: false,
     solo: false,
     locked: false,
     visible: true,
     volume: 1.0,
-    height: 105,
+    height: 74,
     inputSource: {
-      type: 'process',
-      id: 'discord',
-      processName: 'Discord.exe',
-      name: 'Discord Voice',
-      label: 'Discord (Discord.exe)'
+      type: 'device',
+      id: 'default',
+      deviceId: 'default',
+      name: 'Line-In / Gerät',
+      label: 'Line-In / Gerät'
+    },
+    regions: []
+  },
+  {
+    id: 'track-3',
+    index: 2,
+    name: 'Spur 3',
+    muted: false,
+    solo: false,
+    locked: false,
+    visible: true,
+    volume: 1.0,
+    height: 74,
+    inputSource: {
+      type: 'device',
+      id: 'default',
+      deviceId: 'default',
+      name: 'Line-In / Gerät',
+      label: 'Line-In / Gerät'
     },
     regions: []
   },
   {
     id: 'track-4',
     index: 3,
-    name: 'Spur 4 - Spiel / Aux',
+    name: 'Spur 4',
     muted: false,
     solo: false,
     locked: false,
     visible: true,
     volume: 1.0,
-    height: 105,
+    height: 74,
     inputSource: {
       type: 'device',
-      id: 'aux',
-      deviceId: 'aux',
-      name: 'Line-In / Aux',
-      label: 'Line-In / Stereo Mix'
+      id: 'default',
+      deviceId: 'default',
+      name: 'Line-In / Gerät',
+      label: 'Line-In / Gerät'
     },
     regions: []
   }
@@ -138,7 +127,9 @@ export const App: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState<boolean>(false)
   const [isRecording, setIsRecording] = useState<boolean>(false)
   const [currentTime, setCurrentTime] = useState<number>(0.0)
-  const [totalDuration, setTotalDuration] = useState<number>(18.0)
+  const [totalDuration, setTotalDuration] = useState<number>(0.0)
+  const [recordStartPos, setRecordStartPos] = useState<number>(0.0)
+  const [liveRecordedPeaks, setLiveRecordedPeaks] = useState<Record<string, number[]>>({})
   const [isAppendMode, setIsAppendMode] = useState<boolean>(true)
   const [masterVolume, setMasterVolume] = useState<number>(1.0)
   const [selectedOutputDevice, setSelectedOutputDevice] = useState<string>('default')
@@ -236,6 +227,7 @@ export const App: React.FC = () => {
   }, [])
 
   // Update totalDuration dynamically from regions
+  // Calculate total duration from regions dynamically
   useEffect(() => {
     let maxLen = 0
     tracks.forEach((t) => {
@@ -244,66 +236,59 @@ export const App: React.FC = () => {
         if (end > maxLen) maxLen = end
       })
     })
-    if (maxLen > 0) {
-      setTotalDuration((cur) => Math.max(cur, maxLen))
-    }
+    setTotalDuration(maxLen)
   }, [tracks])
 
-  // Playback & Recording Timer Animation Loop
-  const timerRef = useRef<number>()
+  // Subscribe to AudioPlaybackEngine events
   useEffect(() => {
-    if (isPlaying || isRecording) {
-      let lastTimestamp = performance.now()
+    const playback = AudioPlaybackEngine.getInstance()
+    const unsubTime = playback.onTimeUpdate((pos) => {
+      setCurrentTime(pos)
+    })
+    const unsubState = playback.onStateChange((state) => {
+      setIsPlaying(state === 'playing')
+    })
+    return () => {
+      unsubTime()
+      unsubState()
+    }
+  }, [])
 
-      const tick = (now: number) => {
-        const delta = (now - lastTimestamp) / 1000
-        lastTimestamp = now
+  // Animation frame loop for active recording metrics (live time, VU meters, live waveform peaks)
+  const animFrameRef = useRef<number>()
+  useEffect(() => {
+    if (isRecording) {
+      const recEngine = AudioRecordingEngine.getInstance()
 
-        setCurrentTime((prev) => {
-          const next = prev + delta
-          if (isRecording) {
-            setTotalDuration((dur) => Math.max(dur, next))
-          } else if (next >= totalDuration && totalDuration > 0) {
-            setIsPlaying(false)
-            return totalDuration
+      const updateRecordLoop = () => {
+        const elapsed = recEngine.getDuration()
+        const newTime = recordStartPos + elapsed
+        setCurrentTime(newTime)
+        setTotalDuration((prev) => Math.max(prev, newTime))
+
+        // Collect actual real-time VU meter peaks and live waveform peak arrays
+        const nextPeaks: Record<string, LivePeak> = {}
+        const nextRecPeaks: Record<string, number[]> = {}
+
+        tracks.forEach((t) => {
+          nextPeaks[t.id] = recEngine.getPeak(t.id)
+          if (armedTrackIds.has(t.id)) {
+            nextRecPeaks[t.id] = recEngine.getLivePeaks(t.id)
           }
-          return next
         })
 
-        // Generate dynamic VU peaks
-        if (isRecording || isPlaying) {
-          setLivePeaks((prev) => {
-            const nextPeaks = { ...prev }
-            tracks.forEach((t) => {
-              const isTrackActive = isRecording ? armedTrackIds.has(t.id) : !t.muted
-              if (isTrackActive) {
-                const randL = 0.4 + Math.random() * 0.5 * (t.volume || 1.0)
-                const randR = 0.4 + Math.random() * 0.5 * (t.volume || 1.0)
-                const dbL = 20 * Math.log10(Math.max(0.001, randL))
-                const dbR = 20 * Math.log10(Math.max(0.001, randR))
-                nextPeaks[t.id] = {
-                  peakL: randL,
-                  peakR: randR,
-                  peakLdBFS: Math.max(-60, dbL),
-                  peakRdBFS: Math.max(-60, dbR)
-                }
-              } else {
-                nextPeaks[t.id] = { peakL: 0, peakR: 0, peakLdBFS: -60, peakRdBFS: -60 }
-              }
-            })
-            return nextPeaks
-          })
-        }
+        setLivePeaks(nextPeaks)
+        setLiveRecordedPeaks(nextRecPeaks)
 
-        timerRef.current = requestAnimationFrame(tick)
+        animFrameRef.current = requestAnimationFrame(updateRecordLoop)
       }
 
-      timerRef.current = requestAnimationFrame(tick)
+      animFrameRef.current = requestAnimationFrame(updateRecordLoop)
       return () => {
-        if (timerRef.current) cancelAnimationFrame(timerRef.current)
+        if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
       }
-    } else {
-      // Idle / stopped peaks
+    } else if (!isPlaying) {
+      // Idle / stopped peaks reset to quiet floor
       setLivePeaks({
         'track-1': { peakL: 0, peakR: 0, peakLdBFS: -60, peakRdBFS: -60 },
         'track-2': { peakL: 0, peakR: 0, peakLdBFS: -60, peakRdBFS: -60 },
@@ -311,63 +296,124 @@ export const App: React.FC = () => {
         'track-4': { peakL: 0, peakR: 0, peakLdBFS: -60, peakRdBFS: -60 }
       })
     }
-  }, [isPlaying, isRecording, totalDuration, tracks, armedTrackIds])
+  }, [isRecording, isPlaying, recordStartPos, tracks, armedTrackIds])
 
-  // Transport Control Handlers
-  const handlePlay = () => {
-    if (currentTime >= totalDuration) {
+  // Transport Control Handlers with Real Engine Execution
+  const handlePlay = async () => {
+    if (isRecording) {
+      await handleStop()
+    }
+    let playFrom = currentTime
+    if (totalDuration > 0 && currentTime >= totalDuration) {
+      playFrom = 0
       setCurrentTime(0)
     }
-    setIsPlaying(true)
-    setIsRecording(false)
+    try {
+      await AudioPlaybackEngine.getInstance().play(tracks, playFrom)
+      setIsPlaying(true)
+    } catch (err) {
+      console.error('Failed to start playback:', err)
+      setIsPlaying(false)
+    }
   }
 
   const handlePause = () => {
+    AudioPlaybackEngine.getInstance().pause()
     setIsPlaying(false)
   }
 
-  const handleStop = () => {
+  const handleStop = async () => {
     if (isRecording) {
-      // Finalize newly recorded takes into tracks
-      setIsRecording(false)
-      const newTracks = tracks.map((t) => {
-        if (armedTrackIds.has(t.id)) {
-          const recStart = isAppendMode ? Math.max(0, currentTime - 5.0) : currentTime
-          const recDuration = 5.0
-          const newRegion = {
-            id: `reg-${Date.now()}-${t.id}`,
-            name: `Take ${t.regions.length + 1}`,
-            file: { path: `rec_${t.id}.wav`, name: `rec_${t.id}.wav` },
-            startPos: Math.max(0, recStart),
-            duration: recDuration,
-            gain: 1.0,
-            fadeIn: 0.003,
-            fadeOut: 0.003
+      try {
+        const results = await AudioRecordingEngine.getInstance().stopRecording()
+        setIsRecording(false)
+
+        const newTracks = tracks.map((t) => {
+          const res = results.find((r) => r.trackId === t.id)
+          if (res && res.duration > 0.05) {
+            const newRegion: Region = {
+              id: `reg-${Date.now()}-${t.id}`,
+              name: `Take ${t.regions.length + 1}`,
+              file: { path: res.filePath, name: res.filePath.split(/[/\\]/).pop() || res.filePath },
+              startPos: recordStartPos,
+              duration: res.duration,
+              peaks: res.peaks && res.peaks.length > 0 ? res.peaks : undefined,
+              gain: 1.0,
+              fadeIn: 0.003,
+              fadeOut: 0.003
+            }
+            return { ...t, regions: [...t.regions, newRegion] }
           }
-          return { ...t, regions: [...t.regions, newRegion] }
-        }
-        return t
-      })
-      setTracks(newTracks)
-      pushHistory(newTracks)
+          return t
+        })
+
+        setTracks(newTracks)
+        pushHistory(newTracks)
+        setIsModified(true)
+
+        // Preload newly recorded audio for immediate seamless playback
+        AudioPlaybackEngine.getInstance().preloadTracks(newTracks).catch(() => {})
+      } catch (err) {
+        console.error('Failed to stop recording cleanly:', err)
+        setIsRecording(false)
+      }
+    } else {
+      AudioPlaybackEngine.getInstance().stop()
+      setIsPlaying(false)
     }
-    setIsPlaying(false)
   }
 
-  const handleRecord = () => {
+  const handleRecord = async () => {
     if (isRecording) {
-      handleStop()
+      await handleStop()
     } else {
-      if (isAppendMode) {
-        setCurrentTime(totalDuration)
+      // Determine record start anchor
+      const startPos = isAppendMode ? totalDuration : currentTime
+      setRecordStartPos(startPos)
+      setCurrentTime(startPos)
+
+      // Ensure at least one track is armed
+      const effectiveArmed = armedTrackIds.size > 0 ? armedTrackIds : new Set([tracks[0]?.id || 'track-1'])
+      if (armedTrackIds.size === 0 && tracks[0]) {
+        setArmedTrackIds(new Set([tracks[0].id]))
       }
-      setIsPlaying(false)
-      setIsRecording(true)
+
+      const configs: RecordingTrackConfig[] = []
+      tracks.forEach((t) => {
+        if (effectiveArmed.has(t.id)) {
+          const input: InputSource = t.inputSource || {
+            type: 'device',
+            id: 'default',
+            deviceId: 'default',
+            name: 'Mikrofon (Systemstandard)',
+            label: 'Mikrofon (Systemstandard)'
+          }
+          configs.push({
+            trackId: t.id,
+            inputSource: input,
+            tempFilePath: `rec_${t.id}_${Date.now()}.wav`
+          })
+        }
+      })
+
+      try {
+        AudioPlaybackEngine.getInstance().stop()
+        setIsPlaying(false)
+        await AudioRecordingEngine.getInstance().startRecording(configs)
+        setIsRecording(true)
+      } catch (err) {
+        console.error('Failed to start recording session:', err)
+        setIsRecording(false)
+      }
     }
   }
 
   const handleSeek = (time: number) => {
-    setCurrentTime(Math.max(0, Math.min(totalDuration, time)))
+    const clamped = Math.max(0, Math.min(totalDuration, time))
+    setCurrentTime(clamped)
+    if (isPlaying) {
+      AudioPlaybackEngine.getInstance().seek(clamped, tracks)
+    }
   }
 
   const handleToggleArm = (trackId: string) => {
@@ -380,21 +426,27 @@ export const App: React.FC = () => {
   }
 
   const handleToggleMute = (trackId: string) => {
-    setTracks((prev) =>
-      prev.map((t) => (t.id === trackId ? { ...t, muted: !t.muted } : t))
-    )
+    setTracks((prev) => {
+      const updated = prev.map((t) => (t.id === trackId ? { ...t, muted: !t.muted } : t))
+      AudioPlaybackEngine.getInstance().updateRouting(updated)
+      return updated
+    })
   }
 
   const handleToggleSolo = (trackId: string) => {
-    setTracks((prev) =>
-      prev.map((t) => (t.id === trackId ? { ...t, solo: !t.solo } : t))
-    )
+    setTracks((prev) => {
+      const updated = prev.map((t) => (t.id === trackId ? { ...t, solo: !t.solo } : t))
+      AudioPlaybackEngine.getInstance().updateRouting(updated)
+      return updated
+    })
   }
 
   const handleVolumeChange = (trackId: string, volume: number) => {
-    setTracks((prev) =>
-      prev.map((t) => (t.id === trackId ? { ...t, volume } : t))
-    )
+    setTracks((prev) => {
+      const updated = prev.map((t) => (t.id === trackId ? { ...t, volume } : t))
+      AudioPlaybackEngine.getInstance().updateRouting(updated)
+      return updated
+    })
   }
 
   const handleInputChange = (trackId: string, input: InputSource) => {
@@ -409,6 +461,16 @@ export const App: React.FC = () => {
       prev.map((t) => (t.id === trackId ? { ...t, name: newName } : t))
     )
     setIsModified(true)
+  }
+
+  const handleOutputDeviceChange = (deviceId: string) => {
+    setSelectedOutputDevice(deviceId)
+    AudioPlaybackEngine.getInstance().setOutputDevice(deviceId)
+  }
+
+  const handleMasterVolumeChange = (vol: number) => {
+    setMasterVolume(vol)
+    AudioPlaybackEngine.getInstance().setMasterVolume(vol)
   }
 
   // Smart-Cutting Operations (Ripple Cut with 3ms Micro-Fade)
@@ -835,6 +897,8 @@ export const App: React.FC = () => {
                 isPlaying={isPlaying}
                 currentTime={currentTime}
                 totalDuration={totalDuration}
+                recordStartPos={recordStartPos}
+                liveRecordedPeaks={liveRecordedPeaks[track.id] || []}
                 pixelsPerSecond={pixelsPerSecond}
                 scrollLeft={scrollLeft}
                 selection={selection}
@@ -890,8 +954,8 @@ export const App: React.FC = () => {
         onRecord={handleRecord}
         onSeek={handleSeek}
         onToggleAppendMode={() => setIsAppendMode((prev) => !prev)}
-        onOutputDeviceChange={setSelectedOutputDevice}
-        onMasterVolumeChange={setMasterVolume}
+        onOutputDeviceChange={handleOutputDeviceChange}
+        onMasterVolumeChange={handleMasterVolumeChange}
       />
 
       {/* Modals Container */}

@@ -127,9 +127,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     initSettings()
   }, [i18n])
 
-  const handleLanguageChange = (lang: string) => {
+  const handleLanguageChange = async (lang: string) => {
     setCurrentLang(lang)
-    i18n.changeLanguage(lang)
+    await i18n.changeLanguage(lang)
+    try {
+      if (window.api?.saveSettings) {
+        await window.api.saveSettings({ language: lang })
+      }
+    } catch (e) {
+      console.warn('Failed to auto-save language:', e)
+    }
   }
 
   const handleOpenLocalesFolder = async () => {

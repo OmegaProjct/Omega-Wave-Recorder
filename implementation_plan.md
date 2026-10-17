@@ -68,7 +68,7 @@ Die Pfade folgen exakt den Standards der anderen Omega-Tools (z. B. Omega Wave E
   ```
 * **Signalverarbeitung:** `AudioWorkletNode` (`RecordingProcessor`) puffert Float32-Sample-Blöcke (128 Samples pro Frame), berechnet L/R-Spitzenpegel (0.0 bis 1.0 linear, umgerechnet in dBFS) und streamt Chunks.
 
-### 2.2 Kategorie 2: Anwendungs-Audio (OBS-Studio-Methode via WASAPI Process Loopback)
+### 2.2 Kategorie 2: Anwendungs-Audio (WASAPI Process Loopback)
 * **Technologie:** Windows 10 (Build 20348+) / Windows 11 Core Audio API `AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS`:
   * Native Erfassung des Audio-Render-Streams über die Ziel-Prozess-ID (PID) von Programmen wie `Spotify.exe`, `Discord.exe` oder Games.
   * **Echte Prozess-Isolation:** Keine Einstreuung anderer Windows-Sounds, Systemsounds oder Browser-Tabs.
@@ -86,7 +86,7 @@ Die Pfade folgen exakt den Standards der anderen Omega-Tools (z. B. Omega Wave E
 * **Technologie:** Chromium Web Audio `AudioContext.prototype.setSinkId(deviceId)`.
 * **Dropdown im Master-Bereich & in den Einstellungen:**
   * `Systemstandard (Default)` (Geräte-ID `default`).
-  * Alle erkannten Audio-Ausgänge (Kopfhörer, Lautsprecher, GoXLR System, HDMI/Monitor).
+  * Alle erkannten Audio-Ausgänge (Kopfhörer, Lautsprecher, Audio-Interfaces, HDMI/Monitor).
 * **Persistierung:** Ausgewählte `sinkId` wird in `settings.json` gespeichert und beim App-Start automatisch restauriert.
 
 ---
@@ -97,7 +97,7 @@ Die Pfade folgen exakt den Standards der anderen Omega-Tools (z. B. Omega Wave E
 Jede der 4 Spuren besitzt:
 * **Spurname:** Frei editierbar per Doppelklick (z. B. `Spur 1 - Mikrofon`, `Spur 2 - Spotify`).
 * **Input-Dropdown:**
-  * Gruppe 1: *Audiogeräte* (Mikrofone, Line-In, Stereo Mix, GoXLR Chat, Voicemeeter).
+  * Gruppe 1: *Audiogeräte* (Mikrofone, Line-In, Stereo Mix, externe Audio-Interfaces, Voicemeeter).
   * Gruppe 2: *Laufende Programme* (Spotify, Discord, Games, Browser etc.).
 * **Record-Arm Button (`[● R]`):** Schaltet die Spur für die Aufnahme scharf.
 * **Mute (`[M]`):** Stummschalten der Spur bei Wiedergabe und Mixdown.

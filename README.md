@@ -44,14 +44,14 @@ Get the latest stable release of **Omega Wave Recorder** directly from our [Rele
 
 | Operating System | Recommended Installer | Standalone / Portable |
 | :--- | :--- | :--- |
-| **🪟 Windows 10 / 11** (x64) | [**Download Setup (.exe)**](https://github.com/OmegaProjct/Omega-Wave-Recorder/releases/latest/download/Omega-Wave-Recorder-Setup-0.1.0.exe) | [**Download Portable (.exe)**](https://github.com/OmegaProjct/Omega-Wave-Recorder/releases/latest/download/Omega-Wave-Recorder-Portable-0.1.0.exe) |
+| **🪟 Windows 10 / 11** (x64) | [**Download Setup (.exe)**](https://github.com/OmegaProjct/Omega-Wave-Recorder/releases/latest/download/Omega-Wave-Recorder-Setup-0.1.1.exe) | [**Download Portable (.exe)**](https://github.com/OmegaProjct/Omega-Wave-Recorder/releases/latest/download/Omega-Wave-Recorder-Portable-0.1.1.exe) |
 
 ---
 
 <a name="english"></a>
 # 🇬🇧 English Documentation
 
-**Omega Wave Recorder** is a lean, ultra-responsive multitrack audio recorder for Windows, built as part of the **Omega Media Core** suite. Combining modern 4-track parallel and punch-in recording with isolated application audio capture (OBS-style WASAPI Process Loopback) and a nostalgic single-track focus view inspired by classic Windows Sound Recorder (`sndrec32.exe`).
+**Omega Wave Recorder** is a lean, ultra-responsive multitrack audio recorder for Windows, built as part of the **Omega Media Core** suite. Combining modern 4-track parallel and punch-in recording with isolated application audio capture (WASAPI Process Loopback) and a nostalgic single-track focus view inspired by classic Windows Sound Recorder (`sndrec32.exe`).
 
 ---
 
@@ -59,8 +59,8 @@ Get the latest stable release of **Omega Wave Recorder** directly from our [Rele
 ## 🌟 Core Features
 
 ### 1. Dual-Source Audio Capture
-- **Hardware & Line-In Inputs:** Studio-grade 32-bit float PCM recording from physical microphones, line-in interfaces, and virtual devices (GoXLR, Voicemeeter, Stereo Mix).
-- **OBS-Style Process Loopback:** Capture individual Windows applications (e.g., Spotify, Discord, games, browser streams) in clean, isolated audio streams without capturing system notifications, discord beeps, or unwanted sounds.
+- **Hardware & Line-In Inputs:** Studio-grade 32-bit float PCM recording from physical microphones, line-in interfaces, and audio devices (USB interfaces, Voicemeeter, Stereo Mix).
+- **Application Process Loopback:** Capture individual Windows applications (e.g., Spotify, Discord, games, browser streams) in clean, isolated audio streams without capturing system notifications, discord beeps, or unwanted sounds.
 
 ### 2. Multi-Track & Punch-In Recording
 - **Up to 4 Parallel Tracks:** Record up to 4 tracks simultaneously, or record selectively on armed tracks for seamless overdubbing and punch-ins.
@@ -155,7 +155,7 @@ npm run dist
 <a name="deutsch"></a>
 # 🇩🇪 Deutsche Dokumentation
 
-**Omega Wave Recorder** ist ein schlanker, performanter Mehrspur-Audiorekorder für Windows innerhalb der **Omega Media Core** Suite. Er vereint moderne 4-Spur-Parallel- und Punch-in-Aufnahmen, isolierte Programm-Audioaufzeichnung (OBS-Style WASAPI Process Loopback) und eine nostalgische Einzelspur-Fokusansicht im Stil des klassischen Windows WAV-Recorders (`sndrec32.exe`).
+**Omega Wave Recorder** ist ein schlanker, performanter Mehrspur-Audiorekorder für Windows innerhalb der **Omega Media Core** Suite. Er vereint moderne 4-Spur-Parallel- und Punch-in-Aufnahmen, isolierte Programm-Audioaufzeichnung (WASAPI Process Loopback) und eine nostalgische Einzelspur-Fokusansicht im Stil des klassischen Windows WAV-Recorders (`sndrec32.exe`).
 
 ---
 
@@ -163,8 +163,8 @@ npm run dist
 ## 🌟 Hauptfunktionen
 
 ### 1. Duale Audioaufnahme (Hardware & Programme)
-- **Hardware- & Line-In Eingänge:** Kristallklare 32-Bit Float PCM Aufnahme über Mikrofone, Interfaces und virtuelle Geräte (GoXLR, Voicemeeter, Stereo Mix).
-- **OBS-Verfahren für Programm-Audio:** Isoliertes Abgreifen einzelner Windows-Programme (z. B. Spotify, Discord, Spiele, Browser) ohne Störgeräusche von Systemsounds oder Windows-Meldungen.
+- **Hardware- & Line-In Eingänge:** Kristallklare 32-Bit Float PCM Aufnahme über Mikrofone, Interfaces und Audiogeräte (USB-Interfaces, Voicemeeter, Stereo Mix).
+- **Windows Core Audio Loopback:** Isoliertes Abgreifen einzelner Windows-Programme (z. B. Spotify, Discord, Spiele, Browser) ohne Störgeräusche von Systemsounds oder Windows-Meldungen.
 
 ### 2. Mehrspur- & Punch-In Recording
 - **Bis zu 4 parallele Spuren:** Parallele Aufnahme auf mehreren Spuren gleichzeitig oder gezielte Einzelaufnahme auf scharfgeschalteten Spuren für Overdubs.

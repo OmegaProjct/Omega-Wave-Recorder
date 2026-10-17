@@ -72,9 +72,9 @@ function createMainWindow(): BrowserWindow {
   const icon = fs.existsSync(iconPath) ? iconPath : fs.existsSync(fallbackIconPath) ? fallbackIconPath : undefined
 
   mainWindow = new BrowserWindow({
-    width: 920,
-    height: 580,
-    minWidth: 520,
+    width: 800,
+    height: 440,
+    minWidth: 600,
     minHeight: 340,
     center: true,
     frame: false,

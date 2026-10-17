@@ -17,10 +17,10 @@ import {
   RefreshCw,
   ScrollText,
   MessageSquare,
-  LifeBuoy,
   Info,
   Heart
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 interface MenuBarProps {
   onNewProject: () => void
@@ -75,10 +75,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   canRedo = true,
   hasSelection = false
 }) => {
+  const { t } = useTranslation()
   const [activeMenu, setActiveMenu] = useState<MenuKey>(null)
   const menuBarRef = useRef<HTMLDivElement>(null)
 
-  // Close menu on click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (menuBarRef.current && !menuBarRef.current.contains(e.target as Node)) {
@@ -124,20 +124,20 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   return (
     <div
       ref={menuBarRef}
-      className="h-7 bg-[#1e2126] border-b border-[#2d3036] flex items-center px-2 select-none text-xs text-gray-300 z-40 shrink-0"
+      className="h-7 bg-[#1e2126] border-b border-[#2d3036] flex items-center px-2 select-none relative z-40 text-xs text-gray-300 gap-1 shrink-0"
     >
       {/* File Menu */}
       <div className="relative">
         <button
           onClick={() => handleMenuClick('file')}
           onMouseEnter={() => handleMenuHover('file')}
-          className={`px-2.5 py-1 rounded text-xs transition-colors duration-100 ${
+          className={`px-2.5 py-0.5 rounded text-xs transition-colors duration-100 ${
             activeMenu === 'file'
               ? 'bg-omega-accent text-white'
               : 'hover:bg-[#2c3036] text-gray-300 hover:text-white'
           }`}
         >
-          Datei
+          {t('menu.file', 'Datei')}
         </button>
 
         {activeMenu === 'file' && (
@@ -148,7 +148,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             >
               <span className="flex items-center gap-2">
                 <FileText size={14} className="text-gray-400" />
-                Neues Projekt
+                {t('menu.new_project', 'Neues Projekt')}
               </span>
               <kbd className="text-[10px] text-gray-400 font-mono">Strg+N</kbd>
             </button>
@@ -158,7 +158,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             >
               <span className="flex items-center gap-2">
                 <FolderOpen size={14} className="text-gray-400" />
-                Projekt öffnen...
+                {t('menu.open_project', 'Projekt öffnen...')}
               </span>
               <kbd className="text-[10px] text-gray-400 font-mono">Strg+O</kbd>
             </button>
@@ -168,7 +168,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             >
               <span className="flex items-center gap-2">
                 <Save size={14} className="text-gray-400" />
-                Projekt speichern
+                {t('menu.save_project', 'Projekt speichern')}
               </span>
               <kbd className="text-[10px] text-gray-400 font-mono">Strg+S</kbd>
             </button>
@@ -176,7 +176,9 @@ export const MenuBar: React.FC<MenuBarProps> = ({
               onClick={() => executeAction(onSaveProjectAs)}
               className="w-full px-3 py-1.5 flex items-center justify-between hover:bg-omega-accent hover:text-white transition-colors text-left"
             >
-              <span className="flex items-center gap-2 pl-5">Speichern unter...</span>
+              <span className="flex items-center gap-2 pl-5">
+                {t('menu.save_project_as', 'Speichern unter...')}
+              </span>
               <kbd className="text-[10px] text-gray-400 font-mono">Strg+Shift+S</kbd>
             </button>
 
@@ -188,7 +190,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             >
               <span className="flex items-center gap-2">
                 <Download size={14} className="text-omega-accent" />
-                Audio exportieren...
+                {t('menu.export_audio', 'Audio exportieren...')}
               </span>
               <kbd className="text-[10px] text-gray-400 font-mono">Strg+E</kbd>
             </button>
@@ -201,7 +203,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             >
               <span className="flex items-center gap-2">
                 <Settings size={14} className="text-gray-400" />
-                Einstellungen
+                {t('menu.settings', 'Einstellungen')}
               </span>
               <kbd className="text-[10px] text-gray-400 font-mono">Strg+,</kbd>
             </button>
@@ -214,7 +216,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             >
               <span className="flex items-center gap-2">
                 <Power size={14} className="text-red-400" />
-                Beenden
+                {t('menu.quit', 'Beenden')}
               </span>
               <kbd className="text-[10px] text-gray-400 font-mono">Alt+F4</kbd>
             </button>
@@ -227,13 +229,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
         <button
           onClick={() => handleMenuClick('edit')}
           onMouseEnter={() => handleMenuHover('edit')}
-          className={`px-2.5 py-1 rounded text-xs transition-colors duration-100 ${
+          className={`px-2.5 py-0.5 rounded text-xs transition-colors duration-100 ${
             activeMenu === 'edit'
               ? 'bg-omega-accent text-white'
               : 'hover:bg-[#2c3036] text-gray-300 hover:text-white'
           }`}
         >
-          Bearbeiten
+          {t('menu.edit', 'Bearbeiten')}
         </button>
 
         {activeMenu === 'edit' && (
@@ -249,7 +251,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             >
               <span className="flex items-center gap-2">
                 <Undo2 size={14} className="text-gray-400" />
-                Rückgängig
+                {t('menu.undo', 'Rückgängig')}
               </span>
               <kbd className="text-[10px] text-gray-400 font-mono">Strg+Z</kbd>
             </button>
@@ -264,7 +266,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             >
               <span className="flex items-center gap-2">
                 <Redo2 size={14} className="text-gray-400" />
-                Wiederherstellen
+                {t('menu.redo', 'Wiederherstellen')}
               </span>
               <kbd className="text-[10px] text-gray-400 font-mono">Strg+Y</kbd>
             </button>
@@ -273,11 +275,16 @@ export const MenuBar: React.FC<MenuBarProps> = ({
 
             <button
               onClick={() => executeAction(onCutRange)}
-              className="w-full px-3 py-1.5 flex items-center justify-between hover:bg-omega-accent hover:text-white transition-colors text-left"
+              disabled={!hasSelection}
+              className={`w-full px-3 py-1.5 flex items-center justify-between text-left transition-colors ${
+                hasSelection
+                  ? 'hover:bg-omega-accent hover:text-white'
+                  : 'opacity-40 cursor-not-allowed'
+              }`}
             >
               <span className="flex items-center gap-2">
-                <Scissors size={14} className="text-omega-accent" />
-                Bereich schneiden
+                <Scissors size={14} className="text-gray-400" />
+                {t('menu.cut_range', 'Bereich schneiden')}
               </span>
               <kbd className="text-[10px] text-gray-400 font-mono">Strg+X</kbd>
             </button>
@@ -287,8 +294,9 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             >
               <span className="flex items-center gap-2">
                 <ArrowLeftToLine size={14} className="text-gray-400" />
-                Vor Abspielposition löschen
+                {t('menu.delete_before', 'Vor Abspielposition löschen')}
               </span>
+              <kbd className="text-[10px] text-gray-400 font-mono">[</kbd>
             </button>
             <button
               onClick={() => executeAction(onDeleteAfter)}
@@ -296,16 +304,25 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             >
               <span className="flex items-center gap-2">
                 <ArrowRightToLine size={14} className="text-gray-400" />
-                Nach Abspielposition löschen
+                {t('menu.delete_after', 'Nach Abspielposition löschen')}
               </span>
+              <kbd className="text-[10px] text-gray-400 font-mono">]</kbd>
             </button>
+
+            <div className="h-px bg-gray-700/60 my-1" />
+
             <button
               onClick={() => executeAction(onDeleteSelection)}
-              className="w-full px-3 py-1.5 flex items-center justify-between hover:bg-omega-accent hover:text-white transition-colors text-left"
+              disabled={!hasSelection}
+              className={`w-full px-3 py-1.5 flex items-center justify-between text-left transition-colors ${
+                hasSelection
+                  ? 'hover:bg-red-600 hover:text-white'
+                  : 'opacity-40 cursor-not-allowed'
+              }`}
             >
               <span className="flex items-center gap-2">
                 <Trash2 size={14} className="text-red-400" />
-                Löschen
+                {t('menu.delete_selection', 'Löschen')}
               </span>
               <kbd className="text-[10px] text-gray-400 font-mono">Entf</kbd>
             </button>
@@ -318,76 +335,96 @@ export const MenuBar: React.FC<MenuBarProps> = ({
         <button
           onClick={() => handleMenuClick('help')}
           onMouseEnter={() => handleMenuHover('help')}
-          className={`px-2.5 py-1 rounded text-xs transition-colors duration-100 ${
+          className={`px-2.5 py-0.5 rounded text-xs transition-colors duration-100 ${
             activeMenu === 'help'
               ? 'bg-omega-accent text-white'
               : 'hover:bg-[#2c3036] text-gray-300 hover:text-white'
           }`}
         >
-          Hilfe
+          {t('menu.help', 'Hilfe')}
         </button>
 
         {activeMenu === 'help' && (
           <div className="absolute top-full left-0 mt-0.5 w-64 bg-[#24272d] border border-gray-700/80 rounded-lg shadow-2xl py-1 text-xs text-gray-200 z-50 animate-in fade-in duration-100 backdrop-blur-md">
             <button
               onClick={() => executeAction(onOpenManual)}
-              className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-omega-accent hover:text-white transition-colors text-left"
+              className="w-full px-3 py-1.5 flex items-center justify-between hover:bg-omega-accent hover:text-white transition-colors text-left"
             >
-              <BookOpen size={14} className="text-blue-400" />
-              Benutzerhandbuch
+              <span className="flex items-center gap-2">
+                <BookOpen size={14} className="text-gray-400" />
+                {t('menu.manual', 'Benutzerhandbuch')}
+              </span>
+              <kbd className="text-[10px] text-gray-400 font-mono">F1</kbd>
             </button>
             <button
               onClick={() => executeAction(onOpenChangelog)}
-              className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-omega-accent hover:text-white transition-colors text-left"
+              className="w-full px-3 py-1.5 flex items-center justify-between hover:bg-omega-accent hover:text-white transition-colors text-left"
             >
-              <FileCode2 size={14} className="text-emerald-400" />
-              Changelog
+              <span className="flex items-center gap-2">
+                <FileCode2 size={14} className="text-gray-400" />
+                {t('menu.changelog', 'Changelog')}
+              </span>
             </button>
             <button
               onClick={() => executeAction(onCheckUpdates)}
-              className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-omega-accent hover:text-white transition-colors text-left"
+              className="w-full px-3 py-1.5 flex items-center justify-between hover:bg-omega-accent hover:text-white transition-colors text-left"
             >
-              <RefreshCw size={14} className="text-sky-400" />
-              Auf Updates prüfen
+              <span className="flex items-center gap-2">
+                <RefreshCw size={14} className="text-omega-accent" />
+                {t('menu.check_updates', 'Auf Updates prüfen...')}
+              </span>
             </button>
+
+            <div className="h-px bg-gray-700/60 my-1" />
+
             <button
               onClick={() => executeAction(onShowLogs)}
-              className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-omega-accent hover:text-white transition-colors text-left"
+              className="w-full px-3 py-1.5 flex items-center justify-between hover:bg-omega-accent hover:text-white transition-colors text-left"
             >
-              <ScrollText size={14} className="text-amber-400" />
-              Logs anzeigen
+              <span className="flex items-center gap-2">
+                <ScrollText size={14} className="text-gray-400" />
+                {t('menu.show_logs', 'Logs anzeigen')}
+              </span>
+              <kbd className="text-[10px] text-gray-400 font-mono">F12</kbd>
             </button>
             <button
               onClick={() => executeAction(onSendFeedback)}
-              className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-omega-accent hover:text-white transition-colors text-left"
+              className="w-full px-3 py-1.5 flex items-center justify-between hover:bg-omega-accent hover:text-white transition-colors text-left"
             >
-              <MessageSquare size={14} className="text-indigo-400" />
-              Feedback senden
+              <span className="flex items-center gap-2">
+                <MessageSquare size={14} className="text-gray-400" />
+                {t('menu.send_feedback', 'Feedback senden')}
+              </span>
             </button>
             <button
               onClick={() => executeAction(onOpenMessageCenter)}
-              className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-omega-accent hover:text-white transition-colors text-left"
+              className="w-full px-3 py-1.5 flex items-center justify-between hover:bg-omega-accent hover:text-white transition-colors text-left"
             >
-              <LifeBuoy size={14} className="text-cyan-400" />
-              Nachrichtencenter
+              <span className="flex items-center gap-2">
+                <MessageSquare size={14} className="text-gray-400" />
+                {t('menu.message_center', 'Nachrichtencenter')}
+              </span>
             </button>
 
             <div className="h-px bg-gray-700/60 my-1" />
 
             <button
               onClick={() => executeAction(onOpenAbout)}
-              className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-omega-accent hover:text-white transition-colors text-left"
+              className="w-full px-3 py-1.5 flex items-center justify-between hover:bg-omega-accent hover:text-white transition-colors text-left"
             >
-              <Info size={14} className="text-omega-accent" />
-              Über Omega Wave Recorder
+              <span className="flex items-center gap-2">
+                <Info size={14} className="text-gray-400" />
+                {t('menu.about', 'Über Omega Wave Recorder')}
+              </span>
             </button>
-
             <button
               onClick={handleSupportPaypal}
-              className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-[#1d273a] text-blue-300 hover:text-blue-100 transition-colors text-left font-medium"
+              className="w-full px-3 py-1.5 flex items-center justify-between hover:bg-[#ffc439] hover:text-black transition-colors text-left text-amber-400"
             >
-              <Heart size={14} className="text-pink-400 fill-pink-500/20" />
-              Projekt unterstützen (PayPal)
+              <span className="flex items-center gap-2">
+                <Heart size={14} />
+                {t('menu.support_paypal', 'Projekt unterstützen (PayPal)')}
+              </span>
             </button>
           </div>
         )}

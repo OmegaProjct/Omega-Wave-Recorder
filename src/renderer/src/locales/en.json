@@ -56,7 +56,13 @@
     "no_input": "No Input",
     "no_audio": "No Audio Data",
     "recording_active": "Live Recording...",
-    "drop_audio": "Drop audio file here"
+    "drop_audio": "Drop audio file here",
+    "rename": "Rename track",
+    "rename_placeholder": "Track name...",
+    "focus_title": "Track Focus:",
+    "ready": "READY",
+    "live_rec": "● LIVE REC",
+    "play_active": "▶ PLAY"
   },
   "hybrid": {
     "multitrack": "Multi-Track View (4 Tracks)",
@@ -102,7 +108,7 @@
   },
   "about": {
     "title": "About Omega Wave Recorder",
-    "description": "Lean, low-latency multi-track audio recorder in the Omega Media Core suite for Windows. Specialized in studio microphones, direct hardware inputs, and isolated OBS-style process loopback recording (e.g. Spotify, Discord, Games).",
+    "description": "Lean, low-latency multi-track audio recorder in the Omega Media Core suite for Windows. Specialized in studio microphones, direct hardware inputs, and isolated Windows process loopback recording (e.g. Spotify, Discord, Games).",
     "open_github": "Open GitHub Repository",
     "support_paypal": "Support Project (PayPal)",
     "contact_support": "Contact Support"

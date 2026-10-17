@@ -9,6 +9,8 @@ interface TrackLaneProps {
   isPlaying: boolean
   currentTime: number
   totalDuration: number
+  recordStartPos?: number
+  liveRecordedPeaks?: number[]
   pixelsPerSecond?: number
   scrollLeft?: number
   selection: { start: number; end: number } | null
@@ -33,6 +35,8 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
   isPlaying,
   currentTime,
   totalDuration,
+  recordStartPos = 0,
+  liveRecordedPeaks = [],
   pixelsPerSecond = 50,
   scrollLeft = 0,
   selection,
@@ -56,7 +60,7 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
 
   const effectiveDuration = Math.max(totalDuration, 30)
   const laneWidth = Math.max(800, effectiveDuration * pixelsPerSecond)
-  const laneHeight = track.height || 100
+  const laneHeight = track.height || 74
 
   // Draw Waveform Canvas
   useEffect(() => {
@@ -83,7 +87,7 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
 
     // Center baseline
     const centerY = height / 2
-    ctx.strokeStyle = '#22262c'
+    ctx.strokeStyle = '#20242a'
     ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(0, centerY)
@@ -106,72 +110,108 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
         const regStartX = region.startPos * pixelsPerSecond
         const regWidth = region.duration * pixelsPerSecond
 
+        if (regWidth <= 0) return
+
         // Region background container
-        ctx.fillStyle = 'rgba(0, 120, 215, 0.08)'
-        ctx.fillRect(regStartX, 4, regWidth, height - 8)
+        ctx.fillStyle = 'rgba(0, 120, 215, 0.12)'
+        ctx.fillRect(regStartX, 3, regWidth, height - 6)
 
-        ctx.strokeStyle = '#284566'
+        ctx.strokeStyle = '#1e3a5f'
         ctx.lineWidth = 1
-        ctx.strokeRect(regStartX, 4, regWidth, height - 8)
+        ctx.strokeRect(regStartX, 3, regWidth, height - 6)
 
-        // Waveform styling
+        // Waveform styling - Crisp Omega-Blue
         ctx.fillStyle = '#0078d7'
         ctx.strokeStyle = '#0078d7'
         ctx.lineWidth = 1.5
 
-        // Generate synthetic or cached visual peaks for aesthetic representation
-        const sampleStep = 3 // every 3px
-        const maxAmp = (height / 2) - 8
+        const sampleStep = 2 // 2px per bar
+        const maxAmp = (height / 2) - 6
 
         ctx.beginPath()
-        for (let x = 0; x < regWidth; x += sampleStep) {
-          const globalX = regStartX + x
-          // Deterministic pseudorandom audio waveform based on region & position
-          const seed = Math.sin((globalX + rIdx * 100) * 0.1) * Math.cos((globalX + rIdx * 50) * 0.05)
-          const amp = Math.min(1.0, Math.abs(seed) * (region.gain || 1.0) * track.volume) * maxAmp
+        const peaks = region.peaks as number[] | undefined
 
-          ctx.moveTo(globalX, centerY - amp)
-          ctx.lineTo(globalX, centerY + amp)
+        if (peaks && peaks.length > 0) {
+          const totalBars = Math.floor(regWidth / sampleStep)
+          for (let b = 0; b < totalBars; b++) {
+            const peakIdx = Math.floor((b / totalBars) * peaks.length)
+            const p = Math.min(1.0, (peaks[peakIdx] || 0) * (region.gain || 1.0) * (track.volume ?? 1.0))
+            const barAmp = Math.max(2, p * maxAmp)
+            const x = regStartX + b * sampleStep
+
+            ctx.moveTo(x, centerY - barAmp)
+            ctx.lineTo(x, centerY + barAmp)
+          }
+        } else {
+          // Fallback realistic waveform contour
+          for (let x = 0; x < regWidth; x += sampleStep) {
+            const globalX = regStartX + x
+            const harmonic = Math.sin((globalX + rIdx * 80) * 0.12) * Math.cos((globalX + rIdx * 40) * 0.06)
+            const noise = Math.sin(globalX * 0.4) * 0.25
+            const p = Math.min(1.0, Math.abs(harmonic + noise) * (region.gain || 1.0) * (track.volume ?? 1.0))
+            const barAmp = Math.max(2, p * maxAmp)
+
+            ctx.moveTo(globalX, centerY - barAmp)
+            ctx.lineTo(globalX, centerY + barAmp)
+          }
         }
         ctx.stroke()
 
         // Region label
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.75)'
         ctx.font = '10px sans-serif'
-        ctx.fillText(region.name || `Take ${rIdx + 1}`, regStartX + 6, 16)
+        ctx.fillText(region.name || `Take ${rIdx + 1}`, regStartX + 5, 14)
       })
     }
 
-    // If Track is Actively Recording: Draw Neon-Green Live Oscilloscope
+    // If Track is Actively Recording: Draw real growing take anchored at recordStartPos
     if (isRecording && isArmed) {
-      const recHeadX = currentTime * pixelsPerSecond
-      const liveWindowSec = 4.0 // Show 4 seconds of live tail
-      const liveStartX = Math.max(0, recHeadX - liveWindowSec * pixelsPerSecond)
-      const liveWidth = recHeadX - liveStartX
+      const recStartX = recordStartPos * pixelsPerSecond
+      const recEndX = currentTime * pixelsPerSecond
+      const recWidth = Math.max(0, recEndX - recStartX)
 
-      // Live recording background glow
-      ctx.fillStyle = 'rgba(0, 255, 102, 0.06)'
-      ctx.fillRect(liveStartX, 4, liveWidth, height - 8)
+      if (recWidth > 0) {
+        // Live recording container glow
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.1)'
+        ctx.fillRect(recStartX, 2, recWidth, height - 4)
 
-      // Live waveform neon green
-      ctx.strokeStyle = '#00ff66'
-      ctx.lineWidth = 2
-      ctx.shadowColor = 'rgba(0, 255, 102, 0.6)'
-      ctx.shadowBlur = 6
+        ctx.strokeStyle = '#ef4444'
+        ctx.lineWidth = 1
+        ctx.strokeRect(recStartX, 2, recWidth, height - 4)
 
-      const liveStep = 2
-      const maxLiveAmp = (height / 2) - 10
-      const currentPeak = livePeak ? Math.max(livePeak.peakL, livePeak.peakR) : 0.5
+        // Live waveform in bright neon green (#00ff66)
+        ctx.strokeStyle = '#00ff66'
+        ctx.lineWidth = 2
+        ctx.shadowColor = 'rgba(0, 255, 102, 0.5)'
+        ctx.shadowBlur = 4
 
-      ctx.beginPath()
-      for (let x = liveStartX; x <= recHeadX; x += liveStep) {
-        const noise = (Math.sin(x * 0.3) + Math.cos(x * 0.15)) * 0.5
-        const amp = (noise * currentPeak * maxLiveAmp)
-        ctx.moveTo(x, centerY - Math.abs(amp))
-        ctx.lineTo(x, centerY + Math.abs(amp))
+        const liveStep = 2
+        const maxLiveAmp = (height / 2) - 8
+        const totalLiveBars = Math.floor(recWidth / liveStep)
+
+        ctx.beginPath()
+        if (liveRecordedPeaks && liveRecordedPeaks.length > 0) {
+          for (let b = 0; b < totalLiveBars; b++) {
+            const peakIdx = Math.floor((b / totalLiveBars) * liveRecordedPeaks.length)
+            const p = Math.min(1.0, (liveRecordedPeaks[peakIdx] || 0) * (track.volume ?? 1.0))
+            const barAmp = Math.max(2, p * maxLiveAmp)
+            const x = recStartX + b * liveStep
+
+            ctx.moveTo(x, centerY - barAmp)
+            ctx.lineTo(x, centerY + barAmp)
+          }
+        } else {
+          const currentPeak = livePeak ? Math.max(livePeak.peakL, livePeak.peakR) : 0.4
+          for (let x = recStartX; x <= recEndX; x += liveStep) {
+            const noise = (Math.sin(x * 0.3) + Math.cos(x * 0.15)) * 0.5
+            const amp = Math.max(2, Math.abs(noise * currentPeak * maxLiveAmp))
+            ctx.moveTo(x, centerY - amp)
+            ctx.lineTo(x, centerY + amp)
+          }
+        }
+        ctx.stroke()
+        ctx.shadowBlur = 0 // reset shadow
       }
-      ctx.stroke()
-      ctx.shadowBlur = 0 // reset shadow
     }
 
     // In/Out Selection Highlight on this Track
@@ -197,7 +237,7 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
 
     // Playhead Line across this track
     const playheadX = currentTime * pixelsPerSecond
-    ctx.strokeStyle = '#0078d7'
+    ctx.strokeStyle = isRecording ? '#ef4444' : '#0078d7'
     ctx.lineWidth = 1.5
     ctx.beginPath()
     ctx.moveTo(playheadX, 0)
@@ -211,6 +251,8 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
     isRecording,
     currentTime,
     totalDuration,
+    recordStartPos,
+    liveRecordedPeaks,
     pixelsPerSecond,
     selection,
     livePeak,
@@ -219,62 +261,45 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
     laneHeight
   ])
 
-  const getTimeFromEvent = useCallback(
-    (clientX: number): number => {
-      if (!laneContainerRef.current) return 0
-      const rect = laneContainerRef.current.getBoundingClientRect()
-      const x = clientX - rect.left + scrollLeft
-      return Math.max(0, x / pixelsPerSecond)
-    },
-    [pixelsPerSecond, scrollLeft]
-  )
-
+  // Mouse selection & scrub handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
-    const clickTime = getTimeFromEvent(e.clientX)
-    setDragStartPos(clickTime)
+    const container = laneContainerRef.current
+    if (!container) return
+
+    const rect = container.getBoundingClientRect()
+    const clickX = e.clientX - rect.left + container.scrollLeft
+    const timeAtClick = Math.max(0, clickX / pixelsPerSecond)
+
     setIsDragging(true)
-    onSeek(clickTime)
+    setDragStartPos(timeAtClick)
+    onSeek(timeAtClick)
+    onSelectRange(null)
   }
 
-  const handleMouseMove = useCallback(
-    (e: MouseEvent) => {
-      if (!isDragging || dragStartPos === null) return
-      const curTime = getTimeFromEvent(e.clientX)
-      const start = Math.min(dragStartPos, curTime)
-      const end = Math.max(dragStartPos, curTime)
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDragging || dragStartPos === null) return
+    const container = laneContainerRef.current
+    if (!container) return
 
-      if (Math.abs(end - start) > 0.05) {
-        onSelectRange({ start, end })
-      } else {
-        onSelectRange(null)
-      }
-    },
-    [isDragging, dragStartPos, getTimeFromEvent, onSelectRange]
-  )
+    const rect = container.getBoundingClientRect()
+    const currentX = e.clientX - rect.left + container.scrollLeft
+    const timeAtCurrent = Math.max(0, currentX / pixelsPerSecond)
 
-  const handleMouseUp = useCallback(() => {
+    onSelectRange({
+      start: Math.min(dragStartPos, timeAtCurrent),
+      end: Math.max(dragStartPos, timeAtCurrent)
+    })
+  }
+
+  const handleMouseUp = () => {
     setIsDragging(false)
     setDragStartPos(null)
-  }, [])
-
-  useEffect(() => {
-    if (isDragging) {
-      window.addEventListener('mousemove', handleMouseMove)
-      window.addEventListener('mouseup', handleMouseUp)
-      return () => {
-        window.removeEventListener('mousemove', handleMouseMove)
-        window.removeEventListener('mouseup', handleMouseUp)
-      }
-    }
-  }, [isDragging, handleMouseMove, handleMouseUp])
+  }
 
   return (
-    <div
-      className="flex border-b border-[#2d3036] hover:bg-[#181a1d] transition-colors overflow-hidden shrink-0"
-      style={{ height: `${laneHeight}px` }}
-    >
-      {/* Left: Track Header with Controls & Input */}
+    <div className="flex border-b border-[#2d3036] bg-[#141619] hover:bg-[#181a1d] transition-colors relative h-[74px]">
+      {/* Fixed Track Header on Left */}
       <TrackHeader
         track={track}
         isArmed={isArmed}
@@ -291,26 +316,24 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
         onRefreshProcesses={onRefreshProcesses}
       />
 
-      {/* Right: Waveform Lane Canvas */}
+      {/* Scrollable Waveform Canvas Lane */}
       <div
         ref={laneContainerRef}
         onMouseDown={handleMouseDown}
-        onDoubleClick={() => onSelectRange(null)}
-        className="flex-1 relative cursor-crosshair overflow-hidden bg-[#141619]"
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        className="flex-1 overflow-x-hidden relative cursor-crosshair select-none"
+        style={{ height: `${laneHeight}px` }}
       >
         <canvas
           ref={canvasRef}
-          style={{
-            width: `${laneWidth}px`,
-            height: `${laneHeight}px`,
-            transform: `translateX(-${scrollLeft}px)`
-          }}
-          className="pointer-events-none block"
+          style={{ width: `${laneWidth}px`, height: `${laneHeight}px` }}
+          className="block"
         />
 
-        {/* Empty state hint when no audio and not recording */}
+        {/* Empty Track Placeholder message if no regions and not recording */}
         {(!track.regions || track.regions.length === 0) && !isRecording && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-gray-600 text-xs font-mono">
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-gray-700 font-medium text-[11px] tracking-wide select-none">
             Keine Aufnahmen auf dieser Spur
           </div>
         )}

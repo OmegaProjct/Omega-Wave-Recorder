@@ -155,7 +155,7 @@
       "title": "About Omega Wave Recorder",
       "version": "Version {{version}}",
       "suite": "Part of the Omega Media Core Suite",
-      "description": "Lean multitrack audio recorder with up to 4 tracks, OBS-style process loopback, lossless disk streaming, and smart cutting engine.",
+      "description": "Lean multitrack audio recorder with up to 4 tracks, Windows process loopback, lossless disk streaming, and smart cutting engine.",
       "copyright": "Copyright © 2026 Omega Projects. All rights reserved.",
       "github": "GitHub Repository",
       "paypal": "Support Project (PayPal)"

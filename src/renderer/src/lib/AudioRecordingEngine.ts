@@ -25,6 +25,7 @@ export interface RecordingResult {
   sampleRate: number
   totalSamples: number
   channels: number
+  peaks?: number[]
 }
 
 interface ActiveSession {
@@ -42,6 +43,7 @@ interface ActiveSession {
   unwrittenL: Float32Array[]
   unwrittenR: Float32Array[]
   unwrittenSamples: number
+  recordedPeaks: number[]
   peakL: number
   peakR: number
   peakLdBFS: number
@@ -197,6 +199,7 @@ export class AudioRecordingEngine {
         unwrittenL: [],
         unwrittenR: [],
         unwrittenSamples: 0,
+        recordedPeaks: [],
         peakL: 0,
         peakR: 0,
         peakLdBFS: -60,
@@ -241,6 +244,7 @@ export class AudioRecordingEngine {
           console.error(`[AudioRecordingEngine] Failed to initialize device input for track ${track.trackId}:`, err)
           throw err
         }
+      } else if (track.inputSource.type === 'process') {
         // Application WASAPI Loopback capture via Main process
         const pid = track.inputSource.pid || (track.inputSource.id ? parseInt(track.inputSource.id, 10) : undefined)
         const api = typeof window !== 'undefined' ? (window as any).api : undefined
@@ -314,6 +318,7 @@ export class AudioRecordingEngine {
 
     // 3. If actively recording (and not paused), accumulate data and stream to disk
     if (this.isRecordingState && !this.isPausedState) {
+      session.recordedPeaks.push(Math.max(pL, pR))
       session.chunksL.push(left)
       session.chunksR.push(right)
       session.totalSamples += len
@@ -454,12 +459,21 @@ export class AudioRecordingEngine {
         duration: Math.max(0, duration),
         sampleRate: session.sampleRate,
         totalSamples: session.totalSamples,
-        channels: session.channels
+        channels: session.channels,
+        peaks: session.recordedPeaks
       })
     }
 
     this.sessions.clear()
     return results
+  }
+
+  /**
+   * Retrieves the live recorded peak array for an active recording session.
+   */
+  public getLivePeaks(trackId: string): number[] {
+    const session = this.sessions.get(trackId)
+    return session ? session.recordedPeaks : []
   }
 
   /**

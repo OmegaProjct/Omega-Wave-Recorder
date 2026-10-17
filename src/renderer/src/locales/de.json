@@ -56,7 +56,13 @@
     "no_input": "Kein Eingang",
     "no_audio": "Keine Audiodaten",
     "recording_active": "Live-Aufzeichnung...",
-    "drop_audio": "Audiodatei hier ablegen"
+    "drop_audio": "Audiodatei hier ablegen",
+    "rename": "Spur umbenennen",
+    "rename_placeholder": "Spurname...",
+    "focus_title": "Spur Fokus:",
+    "ready": "BEREIT",
+    "live_rec": "● LIVE REC",
+    "play_active": "▶ PLAY"
   },
   "hybrid": {
     "multitrack": "Multi-Track Ansicht (4 Spuren)",
@@ -102,7 +108,7 @@
   },
   "about": {
     "title": "Über Omega Wave Recorder",
-    "description": "Schlanker, latenzarmer Mehrspur-Audiorecorder der Omega Media Core Suite für Windows. Spezialisiert auf Studio-Mikrofone, direkte Hardware-Inputs und isolierte OBS-Style Prozess-Aufnahmen (z. B. Spotify, Discord, Games).",
+    "description": "Schlanker, latenzarmer Mehrspur-Audiorecorder der Omega Media Core Suite für Windows. Spezialisiert auf Studio-Mikrofone, direkte Hardware-Inputs und isolierte Windows-Prozess-Aufnahmen (z. B. Spotify, Discord, Games).",
     "open_github": "GitHub Repository öffnen",
     "support_paypal": "Projekt unterstützen (PayPal)",
     "contact_support": "Support kontaktieren"
