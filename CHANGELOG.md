@@ -2,6 +2,22 @@
 
 The format is based on Keep a Changelog. Dieses Projekt nutzt das klassische Semantic Versioning (`X.Y.Z`).
 
+## [0.1.3] - 2026-10-18
+
+### Deutsch
+
+#### 🐛 Behoben & Verbessert
+- **Vollständige Lokalisierung der Programmeinstellungen**: Sämtliche Reiter (Sprache & Lokalisierung, Audio & I/O, Meldungen & Warnungen), Samplerate-Optionen, Speicherpfade und Warnungs-Status sind nun lückenlos in Deutsch und Englisch verfügbar.
+- **Audio-Wiedergabe von Aufnahmen repariert**: Aufnahmen werden nun mit absoluten Pfaden im AudioTemp-Verzeichnis gespeichert. Die Playback-Engine lädt Audio-Buffer bei Bedarf on-demand und findet Takes über sichere Fallback-Pfade zuverlässig wieder.
+- **Parallele Mehrspur-Aufnahme für mehrere Geräte**: `getUserMedia`-Beschränkungen für Mikrofone wurden auf flexible Hardware-Aushandlung mit Mono/Stereo-Fallback umgestellt. Die Auswahl einer Audioquelle schaltet die Spur automatisch für die Aufnahme scharf.
+
+### English
+
+#### 🐛 Fixed & Improved
+- **Complete Settings Modal Localization**: All tabs (Language & Localization, Audio & I/O, Notifications & Warnings), sample rate options, storage paths, and warning badges are now 100% translated into English and German.
+- **Audio Recording Playback Resolved**: Recording files are now saved with absolute paths into the dedicated AudioTemp directory. The playback engine loads buffers on demand with safe path resolution fallback.
+- **Parallel Multi-Track Recording on Multiple Devices**: Relaxed `getUserMedia` constraints to flexible negotiation with mono/stereo fallback. Selecting an input source now auto-arms the track for instant recording.
+
 ## [0.1.2] - 2026-10-18
 
 ### Deutsch

@@ -25,34 +25,44 @@ interface AudioDevice {
 
 interface SilencedWarning {
   id: string
-  title: string
-  description: string
+  titleKey: string
+  defaultTitle: string
+  descriptionKey: string
+  defaultDescription: string
   isSilenced: boolean
 }
 
 const DEFAULT_WARNINGS: SilencedWarning[] = [
   {
     id: 'wasapi_process_disconnect',
-    title: 'Ziel-Anwendung geschlossen (WASAPI)',
-    description: 'Benachrichtigung, wenn ein aufgenommenes Programm (z. B. Spotify) unerwartet beendet wird.',
+    titleKey: 'settings.warning_process_disconnect_title',
+    defaultTitle: 'Ziel-Anwendung geschlossen',
+    descriptionKey: 'settings.warning_process_disconnect_desc',
+    defaultDescription: 'Benachrichtigung, wenn ein aufgenommenes Programm unerwartet beendet wird.',
     isSilenced: false
   },
   {
     id: 'delete_cut_confirm',
-    title: 'Bestätigung vor Schnittaktionen',
-    description: 'Sicherheitsabfrage vor dem Löschen oder Beschneiden von Spuren.',
+    titleKey: 'settings.warning_delete_cut_confirm_title',
+    defaultTitle: 'Bestätigung vor Schnittaktionen',
+    descriptionKey: 'settings.warning_delete_cut_confirm_desc',
+    defaultDescription: 'Sicherheitsabfrage vor dem Löschen oder Beschneiden von Spuren.',
     isSilenced: false
   },
   {
     id: 'unsaved_project_confirm',
-    title: 'Warnung bei ungespeichertem Projekt',
-    description: 'Bestätigung anfordern, wenn das Programm mit ungesicherten Aufnahmen geschlossen wird.',
+    titleKey: 'settings.warning_unsaved_project_confirm_title',
+    defaultTitle: 'Warnung bei ungespeichertem Projekt',
+    descriptionKey: 'settings.warning_unsaved_project_confirm_desc',
+    defaultDescription: 'Bestätigung anfordern, wenn das Programm mit ungesicherten Aufnahmen geschlossen wird.',
     isSilenced: false
   },
   {
     id: 'buffer_underrun_notice',
-    title: 'Audio-Buffer Warnung',
-    description: 'Hinweis bei drohendem Puffer-Überlauf oder Dropouts während intensiver Festplattenaktivität.',
+    titleKey: 'settings.warning_buffer_underrun_notice_title',
+    defaultTitle: 'Audio-Buffer Warnung',
+    descriptionKey: 'settings.warning_buffer_underrun_notice_desc',
+    defaultDescription: 'Hinweis bei drohendem Puffer-Überlauf oder Dropouts während intensiver Festplattenaktivität.',
     isSilenced: false
   }
 ]
@@ -217,7 +227,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }`}
           >
             <Languages size={14} />
-            <span>Sprache & Lokalisierung</span>
+            <span>{t('settings.tab_language', 'Sprache & Lokalisierung')}</span>
           </button>
           <button
             onClick={() => setActiveTab('audio')}
@@ -228,7 +238,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }`}
           >
             <Headphones size={14} />
-            <span>Audio & I/O</span>
+            <span>{t('settings.tab_audio', 'Audio & I/O')}</span>
           </button>
           <button
             onClick={() => setActiveTab('notifications')}
@@ -239,7 +249,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }`}
           >
             <BellRing size={14} />
-            <span>Meldungen & Warnungen</span>
+            <span>{t('settings.tab_notifications', 'Meldungen & Warnungen')}</span>
           </button>
         </div>
 
@@ -250,14 +260,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="space-y-4">
               <div>
                 <label className="block text-gray-400 font-semibold mb-1.5">
-                  Oberflächensprache:
+                  {t('settings.ui_language', 'Oberflächensprache:')}
                 </label>
                 <select
                   value={currentLang}
                   onChange={(e) => handleLanguageChange(e.target.value)}
                   className="w-full bg-[#1a1d21] border border-gray-700 rounded-lg p-2 text-white outline-none cursor-pointer"
                 >
-                  <option value="de">Deutsch (Standard)</option>
+                  <option value="de">Deutsch</option>
                   <option value="en">English</option>
                   {availableLocales
                     .filter((l) => l !== 'de' && l !== 'en')
@@ -268,15 +278,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     ))}
                 </select>
                 <p className="text-[11px] text-gray-500 mt-1">
-                  Die Sprache wird sofort zur Laufzeit ohne Neustart des Programms umgeschaltet.
+                  {t('settings.ui_language_hint', 'Die Sprache wird sofort zur Laufzeit ohne Neustart des Programms umgeschaltet.')}
                 </p>
               </div>
 
               <div className="bg-[#1a1d21] p-4 rounded-xl border border-gray-800 flex items-center justify-between">
                 <div>
-                  <h4 className="font-bold text-white mb-0.5">Eigene Sprachen hinzufügen</h4>
+                  <h4 className="font-bold text-white mb-0.5">{t('settings.add_custom_languages', 'Eigene Sprachen hinzufügen')}</h4>
                   <p className="text-gray-400 text-[11px]">
-                    Öffnen Sie den Locales-Ordner, um eigene JSON-Übersetzungen hinzuzufügen.
+                    {t('settings.add_custom_languages_hint', 'Öffnen Sie den Locales-Ordner, um eigene JSON-Übersetzungen hinzuzufügen.')}
                   </p>
                 </div>
                 <button
@@ -285,7 +295,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   className="px-3 py-1.5 bg-[#202328] hover:bg-[#2b2f36] border border-gray-700 rounded-lg flex items-center gap-1.5 text-white transition-colors"
                 >
                   <FolderOpen size={14} className="text-omega-accent" />
-                  <span>Sprachordner im Explorer öffnen</span>
+                  <span>{t('settings.open_locales_dir', 'Sprachordner im Explorer öffnen')}</span>
                 </button>
               </div>
             </div>
@@ -296,29 +306,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="space-y-4">
               <div>
                 <label className="block text-gray-400 font-semibold mb-1.5">
-                  Standard-Samplerate (PCM Audio):
+                  {t('settings.sample_rate', 'Standard-Samplerate (PCM Audio):')}
                 </label>
                 <select
                   value={sampleRate}
                   onChange={(e) => setSampleRate(parseInt(e.target.value))}
                   className="w-full bg-[#1a1d21] border border-gray-700 rounded-lg p-2 text-white outline-none"
                 >
-                  <option value={44100}>44.1 kHz (CD Audio)</option>
-                  <option value={48000}>48.0 kHz (Studio Standard - Empfohlen)</option>
-                  <option value={96000}>96.0 kHz (High-Resolution Studio)</option>
+                  <option value={44100}>{t('settings.sample_rate_cd', '44.1 kHz (CD Audio)')}</option>
+                  <option value={48000}>{t('settings.sample_rate_studio', '48.0 kHz (Studio Standard - Empfohlen)')}</option>
+                  <option value={96000}>{t('settings.sample_rate_hires', '96.0 kHz (High-Resolution Studio)')}</option>
                 </select>
               </div>
 
               <div>
                 <label className="block text-gray-400 font-semibold mb-1.5">
-                  Standard-Audioausgang (Monitoring):
+                  {t('settings.output_device', 'Standard-Audioausgang (Monitoring):')}
                 </label>
                 <select
                   value={defaultOutputDevice}
                   onChange={(e) => setDefaultOutputDevice(e.target.value)}
                   className="w-full bg-[#1a1d21] border border-gray-700 rounded-lg p-2 text-white outline-none"
                 >
-                  <option value="default">Systemstandard</option>
+                  <option value="default">{t('transport.system_default', 'Systemstandard')}</option>
                   {outputDevices.map((d) => (
                     <option key={d.deviceId} value={d.deviceId}>
                       {d.label}
@@ -326,18 +336,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   ))}
                 </select>
                 <p className="text-[11px] text-gray-500 mt-1">
-                  Wählt das primäre Ausgabegerät für das Abhören und den Playback-Kanal.
+                  {t('settings.output_device_hint', 'Wählt das primäre Ausgabegerät für das Abhören und den Playback-Kanal.')}
                 </p>
               </div>
 
               <div className="bg-[#1a1d21] p-4 rounded-xl border border-gray-800 space-y-3">
                 <div className="flex items-center gap-2">
                   <HardDrive size={15} className="text-omega-accent" />
-                  <h4 className="font-bold text-white">Speicherpfade</h4>
+                  <h4 className="font-bold text-white">{t('settings.storage_paths', 'Speicherpfade')}</h4>
                 </div>
                 <div>
                   <label className="block text-gray-400 text-[11px] mb-1">
-                    Standardordner für Aufnahmen:
+                    {t('settings.recordings_path', 'Standardordner für Aufnahmen:')}
                   </label>
                   <input
                     type="text"
@@ -356,9 +366,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="font-bold text-white">Stummgeschaltete Hinweise & Warnungen</h3>
+                  <h3 className="font-bold text-white">{t('settings.silenced_warnings', 'Stummgeschaltete Warnungen & Hinweise')}</h3>
                   <p className="text-gray-400 text-[11px]">
-                    Hier können Sie Hinweise wieder aktivieren, die Sie mit „Nicht mehr anzeigen“ ausgeblendet haben.
+                    {t('settings.silenced_warnings_hint', 'Hier können Sie Hinweise wieder aktivieren, die Sie mit „Nicht mehr anzeigen“ ausgeblendet haben.')}
                   </p>
                 </div>
                 <button
@@ -367,7 +377,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   className="px-3 py-1.5 bg-[#1a1d21] hover:bg-[#282c32] border border-gray-700 rounded-lg flex items-center gap-1.5 text-gray-200 hover:text-white transition-colors"
                 >
                   <RotateCcw size={13} className="text-amber-400" />
-                  <span>Alle Warnungen zurücksetzen</span>
+                  <span>{t('settings.reset_all_warnings', 'Alle Hinweise zurücksetzen')}</span>
                 </button>
               </div>
 
@@ -378,8 +388,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="bg-[#1a1d21] p-3 rounded-lg border border-gray-800 flex items-center justify-between"
                   >
                     <div className="flex-1 pr-4">
-                      <div className="font-semibold text-gray-200 text-xs">{w.title}</div>
-                      <div className="text-gray-400 text-[11px]">{w.description}</div>
+                      <div className="font-semibold text-gray-200 text-xs">{t(w.titleKey, w.defaultTitle)}</div>
+                      <div className="text-gray-400 text-[11px]">{t(w.descriptionKey, w.defaultDescription)}</div>
                     </div>
                     <button
                       type="button"
@@ -390,7 +400,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           : 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
                       }`}
                     >
-                      {w.isSilenced ? 'Stummgeschaltet' : 'Aktiv'}
+                      {w.isSilenced ? t('settings.silenced', 'Stummgeschaltet') : t('settings.active', 'Aktiv')}
                     </button>
                   </div>
                 ))}
@@ -406,7 +416,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             onClick={onClose}
             className="px-4 py-1.5 rounded-lg bg-[#202328] hover:bg-[#282c32] border border-gray-700 text-gray-300 transition-colors"
           >
-            Schließen
+            {t('settings.close', 'Schließen')}
           </button>
           <button
             type="button"
@@ -416,10 +426,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {hasSaved ? (
               <>
                 <Check size={14} className="text-emerald-300" />
-                <span>Gespeichert!</span>
+                <span>{t('settings.saved', 'Gespeichert!')}</span>
               </>
             ) : (
-              <span>Speichern</span>
+              <span>{t('settings.save', 'Speichern')}</span>
             )}
           </button>
         </div>

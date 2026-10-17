@@ -6,6 +6,17 @@ import ffmpegStatic from 'ffmpeg-static'
 import ffprobeStatic from 'ffprobe-static'
 import { logger } from '../logger'
 import { isSafePath } from '../utils/pathUtils'
+import { getDocumentsDir } from '../settingsIpc'
+
+export function resolveAudioPath(filePath: string): string {
+  if (!filePath || typeof filePath !== 'string') return ''
+  if (path.isAbsolute(filePath)) {
+    return filePath
+  }
+  const documentsDir = getDocumentsDir()
+  const audioTempDir = path.join(documentsDir, 'AudioTemp')
+  return path.join(audioTempDir, filePath)
+}
 
 // Configure static ffmpeg/ffprobe binary paths with asar.unpacked support
 let ffmpegPath: string | null = (ffmpegStatic as unknown as string) || null
@@ -55,51 +66,54 @@ export interface TranscodeOptions {
 export function registerAudioIpc(): void {
   // Save recording buffer safely to disk
   ipcMain.handle('save-recording', async (_, outputPath: string, arrayBuffer: ArrayBuffer | Buffer) => {
-    logger.info('Audio', 'Speichere Audioaufnahme', { outputPath })
-    if (!isSafePath(outputPath)) {
-      logger.warn('Audio', 'Ungültiger Pfad beim Speichern der Audioaufnahme', { outputPath })
+    const resolvedPath = resolveAudioPath(outputPath)
+    logger.info('Audio', 'Speichere Audioaufnahme', { outputPath, resolvedPath })
+    if (!isSafePath(resolvedPath)) {
+      logger.warn('Audio', 'Ungültiger Pfad beim Speichern der Audioaufnahme', { outputPath, resolvedPath })
       return { success: false, error: 'Ungültiger oder unsicherer Pfad' }
     }
     try {
-      const dir = path.dirname(outputPath)
+      const dir = path.dirname(resolvedPath)
       await fs.promises.mkdir(dir, { recursive: true })
       const buffer = Buffer.isBuffer(arrayBuffer) ? arrayBuffer : Buffer.from(arrayBuffer)
-      await fs.promises.writeFile(outputPath, buffer)
-      logger.info('Audio', 'Audioaufnahme erfolgreich gespeichert', { outputPath, size: buffer.length })
-      return { path: outputPath, success: true }
+      await fs.promises.writeFile(resolvedPath, buffer)
+      logger.info('Audio', 'Audioaufnahme erfolgreich gespeichert', { resolvedPath, size: buffer.length })
+      return { path: resolvedPath, success: true }
     } catch (err: any) {
-      logger.error('Audio', 'Fehler beim Speichern der Audioaufnahme', { outputPath, error: err.message })
+      logger.error('Audio', 'Fehler beim Speichern der Audioaufnahme', { resolvedPath, error: err.message })
       return { success: false, error: err.message }
     }
   })
 
   // Append raw PCM chunk to ongoing recording file on disk
   ipcMain.handle('append-recording-chunk', async (_, trackId: string, filePath: string, buffer: ArrayBuffer) => {
-    if (!isSafePath(filePath)) {
+    const resolvedPath = resolveAudioPath(filePath)
+    if (!isSafePath(resolvedPath)) {
       return { success: false, error: 'Ungültiger Pfad' }
     }
     try {
-      const dir = path.dirname(filePath)
+      const dir = path.dirname(resolvedPath)
       await fs.promises.mkdir(dir, { recursive: true })
-      await fs.promises.appendFile(filePath, Buffer.from(buffer))
+      await fs.promises.appendFile(resolvedPath, Buffer.from(buffer))
       return { success: true }
     } catch (err: any) {
-      logger.error('Audio', 'Fehler beim Anhängen des Audio-Chunks', { trackId, filePath, error: err.message })
+      logger.error('Audio', 'Fehler beim Anhängen des Audio-Chunks', { trackId, filePath, resolvedPath, error: err.message })
       return { success: false, error: err.message }
     }
   })
 
   // Finalize recorded PCM file by writing standard 44-byte WAV header
   ipcMain.handle('finalize-recording-wav', async (_, trackId: string, filePath: string, totalSamples: number, sampleRate: number = 48000, channels: number = 2) => {
-    if (!isSafePath(filePath)) {
+    const resolvedPath = resolveAudioPath(filePath)
+    if (!isSafePath(resolvedPath)) {
       return { success: false, error: 'Ungültiger Pfad' }
     }
     try {
-      if (!fs.existsSync(filePath)) {
+      if (!fs.existsSync(resolvedPath)) {
         return { success: false, error: 'Aufnahmedatei existiert nicht' }
       }
 
-      const pcmData = await fs.promises.readFile(filePath)
+      const pcmData = await fs.promises.readFile(resolvedPath)
       const dataSize = pcmData.length
       const header = Buffer.alloc(44)
       const byteRate = sampleRate * channels * 2
@@ -119,11 +133,11 @@ export function registerAudioIpc(): void {
       header.write('data', 36)
       header.writeUInt32LE(dataSize, 40)
 
-      await fs.promises.writeFile(filePath, Buffer.concat([header, pcmData]))
-      logger.info('Audio', `WAV-Datei erfolgreich finalisiert`, { trackId, filePath, dataSize, totalSamples })
-      return { success: true }
+      await fs.promises.writeFile(resolvedPath, Buffer.concat([header, pcmData]))
+      logger.info('Audio', `WAV-Datei erfolgreich finalisiert`, { trackId, resolvedPath, dataSize, totalSamples })
+      return { success: true, filePath: resolvedPath }
     } catch (err: any) {
-      logger.error('Audio', 'Fehler beim Finalisieren der WAV-Datei', { trackId, filePath, error: err.message })
+      logger.error('Audio', 'Fehler beim Finalisieren der WAV-Datei', { trackId, filePath, resolvedPath, error: err.message })
       return { success: false, error: err.message }
     }
   })
@@ -312,8 +326,33 @@ export function registerAudioIpc(): void {
 
   // Read file as raw buffer
   ipcMain.handle('read-file-buffer', async (_, filePath: string) => {
-    if (!isSafePath(filePath)) throw new Error('Ungültiger Pfad')
-    return await fs.promises.readFile(filePath)
+    let target = resolveAudioPath(filePath)
+    if (!fs.existsSync(target)) {
+      const documentsDir = getDocumentsDir()
+      const base = path.basename(filePath)
+      const candidates = [
+        path.join(documentsDir, 'AudioTemp', base),
+        path.join(documentsDir, 'Recordings', base),
+        path.join(process.cwd(), base),
+        path.join(app.getPath('userData'), base),
+        path.join(path.dirname(app.getPath('exe')), base)
+      ]
+      for (const cand of candidates) {
+        if (fs.existsSync(cand)) {
+          target = cand
+          break
+        }
+      }
+    }
+    if (!isSafePath(target)) {
+      logger.warn('Audio', 'Ungültiger Pfad für read-file-buffer', { target, original: filePath })
+      throw new Error('Ungültiger Pfad')
+    }
+    if (!fs.existsSync(target)) {
+      logger.error('Audio', 'Datei nicht gefunden für read-file-buffer', { target, original: filePath })
+      throw new Error(`Datei nicht gefunden: ${target}`)
+    }
+    return await fs.promises.readFile(target)
   })
 
   // Mixdown multi-track project to an output file via FFmpeg filterchain

@@ -210,18 +210,28 @@ export class AudioRecordingEngine {
       if (track.inputSource.type === 'device') {
         // Hardware microphone capture via Web Audio API + AudioWorklet
         const deviceId = track.inputSource.deviceId || track.inputSource.id
+        const isDefault = !deviceId || deviceId === 'default'
         const constraints: MediaStreamConstraints = {
           audio: {
-            deviceId: deviceId && deviceId !== 'default' ? { exact: deviceId } : undefined,
+            deviceId: isDefault ? undefined : { ideal: deviceId },
+            channelCount: { ideal: 2, min: 1 },
             echoCancellation: false,
             noiseSuppression: false,
-            autoGainControl: false,
-            channelCount: 2
+            autoGainControl: false
           }
         }
 
         try {
-          const stream = await navigator.mediaDevices.getUserMedia(constraints)
+          let stream: MediaStream
+          try {
+            stream = await navigator.mediaDevices.getUserMedia(constraints)
+          } catch (constraintErr) {
+            console.warn(`[AudioRecordingEngine] Preferred constraints failed for track ${track.trackId}, retrying with basic device constraints:`, constraintErr)
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: isDefault ? true : { deviceId: { ideal: deviceId } }
+            })
+          }
+
           const sourceNode = ctx.createMediaStreamSource(stream)
           const workletNode = new AudioWorkletNode(ctx, 'omega-recording-processor')
 
@@ -240,9 +250,9 @@ export class AudioRecordingEngine {
           session.stream = stream
           session.sourceNode = sourceNode
           session.workletNode = workletNode
+          this.sessions.set(track.trackId, session)
         } catch (err) {
           console.error(`[AudioRecordingEngine] Failed to initialize device input for track ${track.trackId}:`, err)
-          throw err
         }
       } else if (track.inputSource.type === 'process') {
         // Application WASAPI Loopback capture via Main process
@@ -251,13 +261,18 @@ export class AudioRecordingEngine {
         if (pid && api?.startLoopbackCapture) {
           try {
             await api.startLoopbackCapture(pid, track.trackId)
+            this.sessions.set(track.trackId, session)
           } catch (err) {
             console.warn(`[AudioRecordingEngine] Failed to start WASAPI loopback for PID ${pid}:`, err)
           }
+        } else {
+          this.sessions.set(track.trackId, session)
         }
       }
+    }
 
-      this.sessions.set(track.trackId, session)
+    if (this.sessions.size === 0) {
+      throw new Error('Kein Audiogerät konnte für die Aufnahme initialisiert werden.')
     }
 
     // Attach loopback chunk IPC listener if any process tracks exist
@@ -437,25 +452,32 @@ export class AudioRecordingEngine {
       const duration = session.totalSamples / (session.sampleRate || 48000)
 
       // 4. Finalize WAV file on disk
+      let finalFilePath = session.tempFilePath
       if (api?.finalizeRecordingWav) {
-        await api.finalizeRecordingWav(
+        const finRes = await api.finalizeRecordingWav(
           session.trackId,
           session.tempFilePath,
           session.totalSamples,
           session.sampleRate,
           session.channels
         )
+        if (finRes && finRes.filePath) {
+          finalFilePath = finRes.filePath
+        }
       } else if (api?.saveRecording) {
         // Complete buffer assemble & save fallback
         const flatL = this.flattenChunks(session.chunksL, session.totalSamples)
         const flatR = this.flattenChunks(session.chunksR, session.totalSamples)
         const wavBuffer = this.encodeWAV([flatL, flatR], session.sampleRate, session.channels)
-        await api.saveRecording(session.tempFilePath, wavBuffer)
+        const saveRes = await api.saveRecording(session.tempFilePath, wavBuffer)
+        if (saveRes && saveRes.path) {
+          finalFilePath = saveRes.path
+        }
       }
 
       results.push({
         trackId: session.trackId,
-        filePath: session.tempFilePath,
+        filePath: finalFilePath,
         duration: Math.max(0, duration),
         sampleRate: session.sampleRate,
         totalSamples: session.totalSamples,

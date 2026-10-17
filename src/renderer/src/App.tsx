@@ -378,6 +378,14 @@ export const App: React.FC = () => {
         setArmedTrackIds(new Set([tracks[0].id]))
       }
 
+      // Get dedicated AudioTemp directory from system if available
+      let tempDir = ''
+      try {
+        if (window.api?.getSystemPath) {
+          tempDir = await window.api.getSystemPath('audioTemp')
+        }
+      } catch {}
+
       const configs: RecordingTrackConfig[] = []
       tracks.forEach((t) => {
         if (effectiveArmed.has(t.id)) {
@@ -388,10 +396,12 @@ export const App: React.FC = () => {
             name: 'Mikrofon (Systemstandard)',
             label: 'Mikrofon (Systemstandard)'
           }
+          const filename = `rec_${t.id}_${Date.now()}.wav`
+          const filePath = tempDir ? `${tempDir.replace(/[\\/]+$/, '')}\\${filename}` : filename
           configs.push({
             trackId: t.id,
             inputSource: input,
-            tempFilePath: `rec_${t.id}_${Date.now()}.wav`
+            tempFilePath: filePath
           })
         }
       })
@@ -453,6 +463,12 @@ export const App: React.FC = () => {
     setTracks((prev) =>
       prev.map((t) => (t.id === trackId ? { ...t, inputSource: input } : t))
     )
+    // Auto-arm track when an input is selected so multi-track recording works out of the box
+    setArmedTrackIds((prev) => {
+      const next = new Set(prev)
+      next.add(trackId)
+      return next
+    })
     setIsModified(true)
   }
 

@@ -251,9 +251,15 @@ export class AudioPlaybackEngine {
         // Skip if region is entirely before playhead
         if (regionEnd <= this.playheadPos) continue
 
-        // Load buffer from cache
-        const audioBuffer = region.file?.path ? this.bufferCache.get(region.file.path) : null
-        if (!audioBuffer) continue
+        // Load buffer from cache or on demand
+        let audioBuffer = region.file?.path ? this.bufferCache.get(region.file.path) : null
+        if (!audioBuffer && region.file?.path) {
+          audioBuffer = await this.loadAudioBuffer(region.file.path)
+        }
+        if (!audioBuffer) {
+          console.warn(`[AudioPlaybackEngine] Skipping region playback, audio buffer not available: ${region.file?.path}`)
+          continue
+        }
 
         let scheduleDelay = 0
         let bufferOffset = region.sourceOffset || 0

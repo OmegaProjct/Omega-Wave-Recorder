@@ -181,7 +181,7 @@ export const ManualModal: React.FC<ManualModalProps> = ({ onClose }) => {
 
         {/* Footer */}
         <div className="bg-[#1a1d21] px-6 py-3 border-t border-gray-800 flex items-center justify-between text-[11px] text-gray-500">
-          <span>Omega Wave Recorder · Stand: Version 0.1.2</span>
+          <span>Omega Wave Recorder · Stand: Version 0.1.3</span>
           <button
             onClick={onClose}
             className="px-4 py-1.5 rounded-lg bg-[#202328] hover:bg-[#2b2f36] border border-gray-700 text-gray-300 hover:text-white transition-colors"

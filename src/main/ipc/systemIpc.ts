@@ -154,6 +154,30 @@ export function registerSystemIpc(): void {
     return os.homedir()
   })
 
+  ipcMain.handle('get-system-path', (_, name: string) => {
+    const { getDocumentsDir } = require('../settingsIpc')
+    const docDir = getDocumentsDir()
+    switch (name) {
+      case 'audioTemp':
+      case 'temp':
+        return path.join(docDir, 'AudioTemp')
+      case 'recordings':
+        return path.join(docDir, 'Recordings')
+      case 'projects':
+        return path.join(docDir, 'Projects')
+      case 'exports':
+        return path.join(docDir, 'Exports')
+      case 'locales':
+        return path.join(docDir, 'Locales')
+      case 'documents':
+        return docDir
+      case 'home':
+        return os.homedir()
+      default:
+        return path.join(docDir, 'AudioTemp')
+    }
+  })
+
   // Open logs folder
   ipcMain.handle('open-logs-folder', async () => {
     await logger.openFolder()

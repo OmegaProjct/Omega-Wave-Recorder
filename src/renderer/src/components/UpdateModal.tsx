@@ -16,7 +16,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
   const [status, setStatus] = useState<
     'checking' | 'up-to-date' | 'available' | 'downloading' | 'ready' | 'error'
   >('checking')
-  const [currentVersion, setCurrentVersion] = useState('0.1.2')
+  const [currentVersion, setCurrentVersion] = useState('0.1.3')
   const [newVersion, setNewVersion] = useState<string | null>(null)
   const [downloadUrl, setDownloadUrl] = useState<string>('')
   const [releaseNotes, setReleaseNotes] = useState<string>('')
