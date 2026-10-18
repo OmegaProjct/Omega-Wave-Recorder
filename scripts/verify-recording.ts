@@ -88,11 +88,17 @@ async function run() {
   await assert.rejects(worklet.engine.startRecording([config('one')]), /WORKLET_FAILED/)
   assert.equal(worklet.stopped(), 1, 'Worklet construction failure must release its media stream')
 
-  const finalize = setup({ finalizeRecordingWav: async () => ({ success: false, error: 'FINALIZE_FAILED' }) })
+  const finalize = setup({ finalizeRecordingWav: async (id: string, filePath: string) => id === 'one'
+    ? { success: false, error: 'FINALIZE_FAILED' } : { success: true, filePath } })
   await finalize.engine.startRecording([config('one'), config('two')])
   finalize.chunk('one', 128)
   finalize.chunk('two', 128)
-  await assert.rejects(finalize.engine.stopRecording(), /FINALIZE_FAILED/)
+  await assert.rejects(finalize.engine.stopRecording(), (error: any) => {
+    assert.match(error.message, /FINALIZE_FAILED/)
+    assert.equal(error.recordings.length, 1, 'Other successfully saved tracks must remain available')
+    assert.equal(error.recordings[0].trackId, 'two')
+    return true
+  })
   assert.equal(finalize.stopped(), 2, 'Every source must be released even if finalization fails')
 
   const slowGate = deferred()

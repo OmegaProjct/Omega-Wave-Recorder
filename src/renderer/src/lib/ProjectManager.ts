@@ -395,17 +395,17 @@ export class ProjectManager {
   // Path Utilities & Name Helpers
   // ==========================================
 
-  public static getDirectoryName(p: string): string {
+  private static getDirectoryName(p: string): string {
     const normalized = p.replace(/\\/g, '/')
     const idx = normalized.lastIndexOf('/')
     return idx === -1 ? '.' : normalized.substring(0, idx)
   }
 
-  public static isAbsolutePath(p: string): boolean {
-    return /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('/')
+  private static isAbsolutePath(p: string): boolean {
+    return /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('/') || p.startsWith('\\\\')
   }
 
-  public static makeRelativePath(fromDir: string, toPath: string): string {
+  private static makeRelativePath(fromDir: string, toPath: string): string {
     const fromNorm = fromDir.replace(/\\/g, '/').replace(/\/$/, '')
     const toNorm = toPath.replace(/\\/g, '/')
 
@@ -415,7 +415,7 @@ export class ProjectManager {
     return toNorm
   }
 
-  public static resolveAbsolutePath(fromDir: string, relPath: string): string {
+  private static resolveAbsolutePath(fromDir: string, relPath: string): string {
     if (this.isAbsolutePath(relPath)) return relPath
     const fromNorm = fromDir.replace(/\\/g, '/').replace(/\/$/, '')
     const relNorm = relPath.replace(/\\/g, '/').replace(/^\.\//, '')

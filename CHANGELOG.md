@@ -2,6 +2,22 @@
 
 The format is based on Keep a Changelog. Dieses Projekt nutzt das klassische Semantic Versioning (`X.Y.Z`).
 
+## [0.1.5] - 2026-10-18
+
+### Deutsch
+
+#### ✨ Neu & Verbessert
+- **1:1 Update-Dialog nach OWE-Standard**: Der Software-Update-Dialog wurde vollständig an das Design des Omega Wave Editors angepasst (großzügiges Studio-Layout, visuelle Versionsgegenüberstellung, zweisprachige Release Notes mit farbigen Kategorie-Badges und Hinweismeldung).
+- **Vollständige Download-Telemetrie**: Während des Herunterladens werden nun exakte Werte für die übertragene und gesamte Datenmenge (MB / GB), Download-Geschwindigkeit (MB/s), verbleibende Restzeit sowie ein Abbrechen-Button angezeigt.
+- **Dezente Toast-Benachrichtigung**: Bei neuen Releases erscheint beim Start nach 2,5 Sekunden automatisch ein dezenter Benachrichtigungs-Toast mit direkter Option zur Detailansicht.
+
+### English
+
+#### ✨ Added & Improved
+- **1:1 Update Modal Matching OWE Standard**: Completely redesigned update experience matching Omega Wave Editor (generous studio layout, visual version comparison, bilingual release notes with category badges, and upgrade warning banner).
+- **Full Download Telemetry**: Real-time display of transferred vs. total data (MB / GB), download speed (MB/s), estimated time remaining (ETA), and a cancel download button.
+- **Subtle Startup Toast Notification**: Automatically detects new updates 2.5s after launch and presents an elegant floating toast with direct access to release details.
+
 ## [0.1.4] - 2026-10-18
 
 ### Deutsch

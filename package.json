@@ -1,6 +1,6 @@
 {
   "name": "omega-wave-recorder",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Omega Wave Recorder - Lean Multitrack Audio Recorder for Omega Media Core",
   "main": "./out/main/index.js",
   "author": "Omega Projects <omegaproject1337@gmail.com>",
@@ -16,7 +16,7 @@
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "typecheck": "tsc --noEmit",
-    "test": "npx tsx scripts/verify-core-logic.ts && npx tsx scripts/verify-recording.ts && npx tsx scripts/verify-playback.ts && node scripts/verify-project-ui.cjs && node scripts/verify-loopback.cjs",
+    "test": "npx tsx scripts/verify-core-logic.ts && npx tsx scripts/verify-recording.ts && npx tsx scripts/verify-playback.ts && node scripts/verify-project-ui.cjs && node scripts/verify-loopback.cjs && node scripts/verify-audio-ipc.cjs",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {

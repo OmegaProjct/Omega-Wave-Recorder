@@ -161,6 +161,25 @@ export const App: React.FC = () => {
   >(null)
   const [settingsTab, setSettingsTab] = useState<'language' | 'audio' | 'notifications'>('language')
   const [logTab, setLogTab] = useState<'logs' | 'feedback'>('logs')
+  const [updateAvailable, setUpdateAvailable] = useState<any | null>(null)
+  const [activeUpdateInfo, setActiveUpdateInfo] = useState<any | null>(null)
+
+  // Automatischer Update-Check beim Start
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        if (window.api?.checkForUpdates) {
+          const result = await window.api.checkForUpdates()
+          if (result && (result.available || result.updateAvailable)) {
+            setUpdateAvailable(result)
+          }
+        }
+      } catch (e) {
+        console.warn('Automatischer Update-Check fehlgeschlagen:', e)
+      }
+    }, 2500)
+    return () => clearTimeout(timer)
+  }, [])
 
   // Zoom & Scrolling
   const [pixelsPerSecond, setPixelsPerSecond] = useState<number>(50)
@@ -328,7 +347,10 @@ export const App: React.FC = () => {
   const handleStop = async () => {
     if (isRecording) {
       try {
-        const results = await AudioRecordingEngine.getInstance().stopRecording()
+        const results = await AudioRecordingEngine.getInstance().stopRecording().catch((error: Error & { recordings?: RecordingResult[] }) => {
+          setSaveError(error instanceof Error ? error.message : String(error))
+          return Array.isArray(error.recordings) ? error.recordings : []
+        })
         setIsRecording(false)
 
         const newTracks = tracks.map((t) => {
@@ -352,8 +374,6 @@ export const App: React.FC = () => {
 
         pushHistory(newTracks)
 
-        // Preload newly recorded audio for immediate seamless playback
-        AudioPlaybackEngine.getInstance().preloadTracks(newTracks).catch(() => {})
       } catch (err) {
         console.error('Failed to stop recording cleanly:', err)
         setSaveError(err instanceof Error ? err.message : String(err))
@@ -691,7 +711,6 @@ export const App: React.FC = () => {
         setSelection(null)
 
         AudioPlaybackEngine.getInstance().updateRouting(projectTracks)
-        AudioPlaybackEngine.getInstance().preloadTracks(projectTracks).catch(() => {})
       }
     } catch (e: any) {
       console.warn('Failed to open project:', e)
@@ -700,8 +719,19 @@ export const App: React.FC = () => {
   }
 
   const handleExportAudio = async (settings: ExportSettings) => {
-    if (window.api?.exportAudio) {
-      await window.api.exportAudio(settings)
+    let result: any = null
+    if (window.api?.exportProject) {
+      result = await window.api.exportProject(tracks, settings)
+    } else if (window.api?.exportAudio) {
+      result = await window.api.exportAudio(tracks, settings)
+    }
+    if (settings.playAfterExport && window.api?.openPath) {
+      const pathToOpen = (result && typeof result === 'object' && result.path) ? result.path : settings.path
+      try {
+        await window.api.openPath(pathToOpen)
+      } catch (e) {
+        console.warn('Failed to play audio after export:', e)
+      }
     }
   }
 
@@ -876,7 +906,10 @@ export const App: React.FC = () => {
         onDeleteSelection={handleCutRange}
         onOpenManual={() => setActiveModal('manual')}
         onOpenChangelog={() => setActiveModal('changelog')}
-        onCheckUpdates={() => setActiveModal('update')}
+        onCheckUpdates={() => {
+          setActiveUpdateInfo(null)
+          setActiveModal('update')
+        }}
         onShowLogs={() => {
           setLogTab('logs')
           setActiveModal('logs')
@@ -1039,7 +1072,48 @@ export const App: React.FC = () => {
       )}
 
       {activeModal === 'update' && (
-        <UpdateModal onClose={() => setActiveModal(null)} />
+        <UpdateModal
+          updateInfo={activeUpdateInfo}
+          onClose={() => {
+            setActiveModal(null)
+            setActiveUpdateInfo(null)
+          }}
+        />
+      )}
+
+      {/* Premium Update Toast */}
+      {updateAvailable && activeModal !== 'update' && (
+        <div className="absolute bottom-6 right-6 z-[9999] bg-[#1a1d21]/95 backdrop-blur-md border border-green-500/30 rounded-lg p-4 shadow-2xl max-w-sm flex flex-col gap-2.5 animate-in fade-in slide-in-from-bottom-5 duration-300 text-sm select-none">
+          <div className="flex items-center gap-2">
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+            </span>
+            <span className="font-semibold text-green-400 text-xs">Software-Update verfügbar</span>
+          </div>
+          <p className="text-gray-300 text-xs leading-relaxed">
+            Eine neuere Version <span className="font-mono text-white font-semibold">v{(updateAvailable.latestVersion || updateAvailable.version || '').replace(/^v/, '')}</span> ist verfügbar. Möchtest du die Details ansehen und das Update installieren?
+          </p>
+          <div className="flex gap-2.5 justify-end mt-1">
+            <button
+              onClick={() => setUpdateAvailable(null)}
+              className="px-2.5 py-1 text-xs text-gray-400 hover:text-white transition-colors"
+            >
+              Später
+            </button>
+            <button
+              onClick={() => {
+                const info = updateAvailable
+                setUpdateAvailable(null)
+                setActiveUpdateInfo(info)
+                setActiveModal('update')
+              }}
+              className="px-3 py-1 text-xs bg-omega-accent hover:bg-blue-500 text-white font-semibold rounded shadow transition-colors active:scale-[0.98]"
+            >
+              Details ansehen
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )

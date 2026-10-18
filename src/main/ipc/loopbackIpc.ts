@@ -51,8 +51,8 @@ function checkProcessAlive(pid?: number, processName?: string): Promise<boolean>
 /**
  * Helper to fetch list of running processes with window handles / names.
  */
-async function getRunningProcessMap(): Promise<Map<string, { pid: number; name: string }>> {
-  const map = new Map<string, { pid: number; name: string }>()
+async function getRunningProcessMap(): Promise<Map<number, { pid: number; name: string }>> {
+  const map = new Map<number, { pid: number; name: string }>()
   return new Promise((resolve) => {
     // tasklist /fo csv /nh
     exec('tasklist /FO CSV /NH', (err, stdout) => {
@@ -68,7 +68,7 @@ async function getRunningProcessMap(): Promise<Map<string, { pid: number; name: 
           const name = parts[0]
           const pid = parseInt(parts[1], 10)
           if (name && !isNaN(pid)) {
-            map.set(name.toLowerCase(), { pid, name })
+            map.set(pid, { pid, name })
           }
         }
       }
@@ -84,7 +84,7 @@ export function registerLoopbackIpc(): void {
     try {
       const [sources, processMap] = await Promise.all([
         desktopCapturer.getSources({ types: ['window'], fetchWindowIcons: true }),
-        getRunningProcessMap().catch(() => new Map<string, { pid: number; name: string }>())
+        getRunningProcessMap().catch(() => new Map<number, { pid: number; name: string }>())
       ])
 
       const pidToName = new Map<number, string>()
@@ -111,38 +111,7 @@ export function registerLoopbackIpc(): void {
               }
             }
 
-            // If PID was resolved, look up exact process name from running processes
-            if (detectedPid > 0 && pidToName.has(detectedPid)) {
-              detectedProcessName = pidToName.get(detectedPid)!
-            } else {
-              // Heuristic fallback matching with running process map
-              const lowerTitle = source.name.toLowerCase()
-              for (const [procKey, procInfo] of processMap.entries()) {
-                const baseName = procKey.replace('.exe', '')
-                if (lowerTitle.includes(baseName) || baseName.includes(lowerTitle)) {
-                  detectedProcessName = procInfo.name
-                  if (detectedPid === 0) detectedPid = procInfo.pid
-                  break
-                }
-              }
-
-              // Common application title matches
-              if (detectedProcessName === 'Application.exe') {
-                if (lowerTitle.includes('spotify')) {
-                  detectedProcessName = 'Spotify.exe'
-                } else if (lowerTitle.includes('discord')) {
-                  detectedProcessName = 'Discord.exe'
-                } else if (lowerTitle.includes('chrome')) {
-                  detectedProcessName = 'chrome.exe'
-                } else if (lowerTitle.includes('firefox')) {
-                  detectedProcessName = 'firefox.exe'
-                } else if (lowerTitle.includes('edge')) {
-                  detectedProcessName = 'msedge.exe'
-                } else {
-                  detectedProcessName = `${source.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.exe`
-                }
-              }
-            }
+            detectedProcessName = pidToName.get(detectedPid) || source.name
 
             const iconUrl = source.appIcon ? source.appIcon.toDataURL() : undefined
 
@@ -158,7 +127,7 @@ export function registerLoopbackIpc(): void {
       )
 
       logger.debug('Loopback', `${windows.length} sichtbare Fenster gefunden`)
-      return windows
+      return windows.filter(window => window.pid > 0)
     } catch (err: any) {
       logger.error('Loopback', 'Fehler beim Scannen der Fenster', err)
       return []

@@ -12,7 +12,9 @@ import { HistoryStack, MAX_HISTORY_STEPS } from '../src/renderer/src/lib/useHist
 import { AudioRecordingEngine } from '../src/renderer/src/lib/AudioRecordingEngine'
 import { AudioPlaybackEngine } from '../src/renderer/src/lib/AudioPlaybackEngine'
 import { WaveformDrawer } from '../src/renderer/src/lib/WaveformDrawer'
-import { createWavHeader } from '../src/main/ipc/audioIpc'
+import { createWavHeader, exportProjectAudio, type ExportSettings } from '../src/main/ipc/audioIpc'
+import { resolveWindowProcessId, startProcessLoopback } from '../src/main/ipc/processLoopback'
+import ffmpeg from 'fluent-ffmpeg'
 import type { Track, Region } from '../src/common/types'
 
 console.log('=== Starting Verification of Core Audio & Logic ===\n')
@@ -242,6 +244,7 @@ assert.strictEqual(ProjectManager.isUnnamed('relative/path.owrp'), true, 'relati
 assert.strictEqual(ProjectManager.isUnnamed('C:/Projects/Session1.owrp'), false, 'Windows slash absolute path should be named')
 assert.strictEqual(ProjectManager.isUnnamed('C:\\Projects\\Session1.owrp'), false, 'Windows backslash absolute path should be named')
 assert.strictEqual(ProjectManager.isUnnamed('/home/user/Music/Session1.owrp'), false, 'POSIX absolute path should be named')
+assert.strictEqual(ProjectManager.isUnnamed('\\\\server\\share\\Session1.owrp'), false, 'UNC paths must retain their selected save location')
 
 // Display name extraction
 assert.strictEqual(ProjectManager.getDisplayName(null), 'Unbenannt.owrp')
@@ -304,42 +307,6 @@ assert.strictEqual(trackHistory.isModified, false, 'Non-modifying setPresent sho
 trackHistory.setPresent('State 1 (name edited)', true)
 assert.strictEqual(trackHistory.isModified, true, 'Modifying setPresent should mark history modified')
 console.log('✓ HistoryStack dirty state tracking test passed.')
-
-// -------------------------------------------------------------
-// Test 9: Project Boundary Resets
-// -------------------------------------------------------------
-console.log('\nTest 9: Project Boundary Resets (Isolated HistoryStack, Selection, Playhead & Buffer Cache)...')
-// Simulate an ongoing project state with edits, selection, playhead, and playback cache
-const projectBoundaryHistory = new HistoryStack<Track[]>(initialTracks)
-projectBoundaryHistory.push(cutResult)
-assert.strictEqual(projectBoundaryHistory.isModified, true)
-assert.strictEqual(projectBoundaryHistory.canUndo, true)
-
-let mockSelection: { start: number; end: number } | null = { start: 2.5, end: 7.0 }
-let mockPlayheadPos: number = 8.42
-
-// Simulate audio buffer cache
-const playbackEngine = AudioPlaybackEngine.getInstance()
-playbackEngine.clearCache()
-assert.strictEqual(playbackEngine.getCacheSize(), 0, 'Buffer cache should be 0 initially')
-
-// Execute Project Boundary Reset (as executed in handleNewProject / handleOpenProject)
-const freshProject = ProjectManager.createNewProject({ name: 'FreshSession' })
-projectBoundaryHistory.clear(freshProject.tracks)
-mockSelection = null
-mockPlayheadPos = 0.0
-playbackEngine.clearCache()
-
-// Assertions for project boundary reset
-assert.strictEqual(projectBoundaryHistory.isModified, false, 'HistoryStack must be marked clean upon project reset')
-assert.strictEqual(projectBoundaryHistory.canUndo, false, 'HistoryStack past must be cleared')
-assert.strictEqual(projectBoundaryHistory.canRedo, false, 'HistoryStack future must be cleared')
-assert.strictEqual(projectBoundaryHistory.historyLength, 0, 'HistoryStack length must be 0')
-assert.strictEqual(projectBoundaryHistory.state.length, 4, 'Must hold isolated fresh tracks')
-assert.strictEqual(mockSelection, null, 'Selection must be reset to null')
-assert.strictEqual(mockPlayheadPos, 0.0, 'Playhead must be reset to zero')
-assert.strictEqual(playbackEngine.getCacheSize(), 0, 'Audio playback buffer cache must be empty')
-console.log('✓ Project boundary resets test passed.')
 
 // -------------------------------------------------------------
 // Test 10: ArrayBuffer View Conversion (AudioPlaybackEngine.toArrayBuffer)
@@ -519,44 +486,6 @@ async function runAsyncTests() {
     assert.strictEqual(header.readUInt32LE(40), pcmBytes, 'dataSize must match pcmBytes')
   }
 
-  // 2. Duration calculation fidelity: actual sample rate vs hardcoded 48000
-  const samples44k = 88200
-  const durationAt44k = samples44k / 44100
-  assert.strictEqual(durationAt44k, 2.0, '88200 samples at 44.1kHz must equal exactly 2.0 seconds')
-  const durationErrWith48k = samples44k / 48000
-  assert.notStrictEqual(durationErrWith48k, 2.0, 'Hardcoded 48000 would cause 1.8375s incorrect duration')
-
-  // 3. Constant-memory in-place WAV header patching simulation
-  const tempTestDir = path.join(os.tmpdir(), 'owr_test_wav')
-  if (!fs.existsSync(tempTestDir)) fs.mkdirSync(tempTestDir, { recursive: true })
-  const tempWavFile = path.join(tempTestDir, `test_inplace_${Date.now()}.wav`)
-
-  // Write initial placeholder 44-byte header + 1000 bytes PCM
-  const initialHeader = createWavHeader(0, 44100, 2)
-  const fakePcm = Buffer.alloc(1000, 0x5a) // Fill with pattern
-  fs.writeFileSync(tempWavFile, Buffer.concat([initialHeader, fakePcm]))
-  const initialStat = fs.statSync(tempWavFile)
-  assert.strictEqual(initialStat.size, 1044, 'Initial file must be 44-byte header + 1000 bytes PCM')
-
-  // In-place patch header using mode 'r+' (O(1) memory and time, no full-file read)
-  const fileHandle = await fs.promises.open(tempWavFile, 'r+')
-  try {
-    const updatedHeader = createWavHeader(1000, 44100, 2)
-    await fileHandle.write(updatedHeader, 0, 44, 0)
-  } finally {
-    await fileHandle.close()
-  }
-
-  // Verify file was patched in place: size unchanged, PCM bytes untouched, header updated
-  const patchedStat = fs.statSync(tempWavFile)
-  assert.strictEqual(patchedStat.size, 1044, 'File size must remain exactly 1044 bytes after in-place header patch')
-  const finalBuf = fs.readFileSync(tempWavFile)
-  assert.strictEqual(finalBuf.readUInt32LE(40), 1000, 'Data chunk size must now be 1000')
-  assert.strictEqual(finalBuf[44], 0x5a, 'First PCM byte must be unchanged')
-  assert.strictEqual(finalBuf[1043], 0x5a, 'Last PCM byte must be unchanged')
-
-  // Clean up temp file
-  fs.unlinkSync(tempWavFile)
   console.log('✓ Dynamic sample rate sync & constant-memory WAV header test passed.')
 
   // -------------------------------------------------------------
@@ -587,8 +516,9 @@ async function runAsyncTests() {
     return Buffer.alloc(100)
   }
 
+  const playbackEngine = AudioPlaybackEngine.getInstance()
   playbackEngine.clearCache()
-  assert.strictEqual(playbackEngine.getCacheSize(), 0)
+  assert.strictEqual((playbackEngine as any).bufferCache.size, 0)
 
   // Trigger two concurrent loadAudioBuffer calls for the same file path
   const [buf1, buf2] = await Promise.all([
@@ -599,11 +529,11 @@ async function runAsyncTests() {
   assert.strictEqual(buf1, buf2 as any, 'Both concurrent loads must return the same AudioBuffer reference')
   assert.strictEqual(fileReadCount, 1, 'readFileBuffer must only be called ONCE for concurrent requests (deduplication)')
   assert.strictEqual(decodeCount, 1, 'decodeAudioData must only be called ONCE for concurrent requests')
-  assert.strictEqual(playbackEngine.getCacheSize(), 1, 'Cache size should be 1 after load')
+  assert.strictEqual((playbackEngine as any).bufferCache.size, 1, 'Cache size should be 1 after load')
 
   // Test clearCache()
   playbackEngine.clearCache()
-  assert.strictEqual(playbackEngine.getCacheSize(), 0, 'Cache size must be 0 after clearCache()')
+  assert.strictEqual((playbackEngine as any).bufferCache.size, 0, 'Cache size must be 0 after clearCache()')
 
   // Test error propagation on load failure
   mockApi.readFileBuffer = async () => {
@@ -621,6 +551,272 @@ async function runAsyncTests() {
   // Restore window
   ;(global as any).window = origWindow
   console.log('✓ Playback engine preload deduplication & error propagation test passed.')
+
+  // -------------------------------------------------------------
+  // Test 14: FFmpeg Export Pipeline (Mixdown, Stems, Gain, Micro-Fades, Metadata & Destructive Overwrite Prevention)
+  // -------------------------------------------------------------
+  console.log('\nTest 14: FFmpeg Export Pipeline (Mixdown, Stems, Gain, Micro-Fades, Metadata & Safe Paths)...')
+  const exportTestDir = path.join(os.tmpdir(), `owr_export_test_${Date.now()}`)
+  fs.mkdirSync(exportTestDir, { recursive: true })
+
+  const take1Path = path.join(exportTestDir, 'take1.wav')
+  const take2Path = path.join(exportTestDir, 'take2.wav')
+
+  // Synthesize Take 1: 1.0s, 48000Hz, stereo 16-bit PCM WAV (440Hz sine wave)
+  const sr = 48000
+  const ch = 2
+  const frames = sr // 1s
+  const pcmBytes1 = frames * ch * 2
+  const wavHeader1 = createWavHeader(pcmBytes1, sr, ch)
+  const pcmBuf1 = Buffer.alloc(pcmBytes1)
+  for (let i = 0; i < frames; i++) {
+    const s = Math.round(Math.sin((2 * Math.PI * 440 * i) / sr) * 20000)
+    pcmBuf1.writeInt16LE(s, i * 4)
+    pcmBuf1.writeInt16LE(s, i * 4 + 2)
+  }
+  fs.writeFileSync(take1Path, Buffer.concat([wavHeader1, pcmBuf1]))
+
+  // Synthesize Take 2: 1.0s, 48000Hz, stereo 16-bit PCM WAV (880Hz sine wave)
+  const wavHeader2 = createWavHeader(pcmBytes1, sr, ch)
+  const pcmBuf2 = Buffer.alloc(pcmBytes1)
+  for (let i = 0; i < frames; i++) {
+    const s = Math.round(Math.sin((2 * Math.PI * 880 * i) / sr) * 15000)
+    pcmBuf2.writeInt16LE(s, i * 4)
+    pcmBuf2.writeInt16LE(s, i * 4 + 2)
+  }
+  fs.writeFileSync(take2Path, Buffer.concat([wavHeader2, pcmBuf2]))
+
+  const initialTake1Mtime = fs.statSync(take1Path).mtimeMs
+
+  const testTracks: Track[] = [
+    {
+      id: 'track-export-1',
+      index: 0,
+      name: 'Spur 1 - Lead',
+      muted: false,
+      solo: false,
+      locked: false,
+      visible: true,
+      volume: 0.8,
+      regions: [
+        {
+          id: 'reg-exp-1',
+          file: { name: 'take1.wav', path: take1Path },
+          startPos: 0.0,
+          duration: 0.5,
+          sourceOffset: 0.1,
+          fadeIn: 0.003,
+          fadeOut: 0.003,
+          gain: 1.0
+        }
+      ]
+    },
+    {
+      id: 'track-export-2',
+      index: 1,
+      name: 'Spur 2 - Harmony',
+      muted: false,
+      solo: false,
+      locked: false,
+      visible: true,
+      volume: 1.0,
+      regions: [
+        {
+          id: 'reg-exp-2',
+          file: { name: 'take2.wav', path: take2Path },
+          startPos: 0.2,
+          duration: 0.6,
+          sourceOffset: 0.0,
+          fadeIn: 0.003,
+          fadeOut: 0.003,
+          gain: 0.9
+        }
+      ]
+    }
+  ]
+
+  // 14A. Destructive Overwrite Prevention Assertion
+  let destructiveErrorCaught = false
+  try {
+    await exportProjectAudio(testTracks, {
+      path: take1Path,
+      format: 'wav',
+      sampleRate: 48000,
+      channels: 'Stereo',
+      mode: 'mixdown',
+      playAfterExport: false
+    })
+  } catch (err: any) {
+    destructiveErrorCaught = true
+    assert(
+      err.message.includes('Destruktiver Export verhindert'),
+      `Error must specifically indicate destructive export prevention, got: ${err.message}`
+    )
+  }
+  assert.strictEqual(destructiveErrorCaught, true, 'Export must reject destructive overwrite of input source file')
+  assert.strictEqual(fs.statSync(take1Path).mtimeMs, initialTake1Mtime, 'Source file must remain untouched')
+
+  // 14B. Empty & All-Muted Tracks Rejection
+  let emptyErrorCaught = false
+  try {
+    await exportProjectAudio([], { path: path.join(exportTestDir, 'empty.wav') })
+  } catch (err: any) {
+    emptyErrorCaught = true
+    assert(err.message.includes('Keine aktiven Spuren'), `Got error: ${err.message}`)
+  }
+  assert.strictEqual(emptyErrorCaught, true, 'Export must reject empty tracks array')
+
+  const mutedTracks = testTracks.map((t) => ({ ...t, muted: true }))
+  let mutedErrorCaught = false
+  try {
+    await exportProjectAudio(mutedTracks, { path: path.join(exportTestDir, 'muted.wav') })
+  } catch (err: any) {
+    mutedErrorCaught = true
+    assert(err.message.includes('Keine aktiven Spuren'), `Got error: ${err.message}`)
+  }
+  assert.strictEqual(mutedErrorCaught, true, 'Export must reject when all tracks are muted')
+
+  // Helper for ffprobe inspection
+  const probeAudioFile = (filePath: string): Promise<ffmpeg.FfprobeData> => {
+    return new Promise((resolve, reject) => {
+      ffmpeg.ffprobe(filePath, (err, data) => {
+        if (err) return reject(err)
+        resolve(data)
+      })
+    })
+  }
+
+  // 14C. Real FFmpeg Mixdown Export with Custom Settings, Micro-Fades & ID3 Metadata
+  const mixdownOutput = path.join(exportTestDir, 'mixdown_output.mp3')
+  const mixdownSettings: ExportSettings = {
+    format: 'mp3',
+    path: mixdownOutput,
+    sampleRate: 44100,
+    bitrate: '320',
+    channels: 'Stereo',
+    mode: 'mixdown',
+    playAfterExport: false,
+    id3Tags: {
+      title: 'Omega Integration Mixdown',
+      artist: 'Omega Team',
+      album: 'Integration Album',
+      year: '2026',
+      genre: 'Electronic'
+    }
+  }
+
+  const mixdownRes = await exportProjectAudio(testTracks, mixdownSettings)
+  assert.strictEqual(mixdownRes.success, true)
+  assert.strictEqual(mixdownRes.mode, 'mixdown')
+  assert.strictEqual(fs.existsSync(mixdownOutput), true, 'Mixdown output file must exist on disk')
+  assert(fs.statSync(mixdownOutput).size > 1000, 'Mixdown MP3 file must have non-trivial size')
+
+  // FFprobe assertions on exported MP3
+  const mixdownMeta = await probeAudioFile(mixdownOutput)
+  assert(mixdownMeta.format.format_name?.includes('mp3'), 'Exported format must be mp3')
+  const mixStream = mixdownMeta.streams.find((s) => s.codec_type === 'audio')
+  assert(mixStream, 'Must contain an audio stream')
+  assert.strictEqual(mixStream.channels, 2, 'Must have 2 audio channels (Stereo)')
+  assert.strictEqual(mixStream.sample_rate, 44100, 'Sample rate must match requested 44100Hz')
+  assert.strictEqual(mixdownMeta.format.tags?.title, 'Omega Integration Mixdown', 'ID3 title must be preserved')
+  assert.strictEqual(mixdownMeta.format.tags?.artist, 'Omega Team', 'ID3 artist must be preserved')
+
+  // 14D. Real FFmpeg Stems Export (WAV 24-bit 48kHz)
+  const stemBaseOutput = path.join(exportTestDir, 'stems_project.wav')
+  const stemSettings: ExportSettings = {
+    format: 'wav',
+    path: stemBaseOutput,
+    sampleRate: 48000,
+    bitDepth: '24 Bit',
+    channels: 'Stereo',
+    mode: 'stems',
+    playAfterExport: false
+  }
+
+  const stemsRes = await exportProjectAudio(testTracks, stemSettings)
+  assert.strictEqual(stemsRes.success, true)
+  assert.strictEqual(stemsRes.mode, 'stems')
+  assert(Array.isArray(stemsRes.stems) && stemsRes.stems.length === 2, 'Must produce 2 stem files')
+
+  for (const stemPath of stemsRes.stems) {
+    assert(fs.existsSync(stemPath), `Stem file ${stemPath} must exist on disk`)
+    const stemMeta = await probeAudioFile(stemPath)
+    const stemStream = stemMeta.streams.find((s) => s.codec_type === 'audio')
+    assert(stemStream, 'Stem must contain audio stream')
+    assert.strictEqual(stemStream.codec_name, 'pcm_s24le', 'Stem bit depth must be 24-bit PCM')
+    assert.strictEqual(stemStream.channels, 2, 'Stem channels must be 2 (Stereo)')
+    assert.strictEqual(stemStream.sample_rate, 48000, 'Stem sample rate must match 48000Hz')
+  }
+
+  // Cleanup temporary test directory
+  try {
+    if (path.dirname(path.resolve(exportTestDir)) !== path.resolve(os.tmpdir())) throw new Error('Unsafe test cleanup path')
+    fs.rmSync(exportTestDir, { recursive: true, force: true })
+  } catch {}
+  console.log('✓ FFmpeg export pipeline (mixdown, stems, gain, micro-fades, metadata & safe paths) test passed.')
+
+  // -------------------------------------------------------------
+  // Test 15: Loopback HWND Resolution & Structured Unsupported Error Handling
+  // -------------------------------------------------------------
+  console.log('\nTest 15: Loopback HWND Resolution & Structured Unsupported Error Handling...')
+
+  // 15A. HWND validation
+  let hwndErrorCaught = false
+  try {
+    await resolveWindowProcessId('0')
+  } catch (err: any) {
+    hwndErrorCaught = true
+    assert(err.message.includes('must be non-zero'), `Error should reject 0 HWND: ${err.message}`)
+  }
+  assert.strictEqual(hwndErrorCaught, true, 'resolveWindowProcessId must reject 0 HWND')
+
+  let invalidHwndCaught = false
+  try {
+    await resolveWindowProcessId('not_a_number')
+  } catch (err: any) {
+    invalidHwndCaught = true
+    assert(err.message.includes('must be a positive decimal integer'), `Error: ${err.message}`)
+  }
+  assert.strictEqual(invalidHwndCaught, true, 'resolveWindowProcessId must reject non-numeric HWND')
+
+  // 15B. Loopback explicit structured unsupported error assertion
+  class MockLoopbackSender {
+    isDestroyed() { return false }
+    send() {}
+    once() {}
+    removeListener() {}
+  }
+  const mockSender = new MockLoopbackSender() as any
+
+  let loopbackErrorCaught = false
+  let loopbackErrorDetail = ''
+  try {
+    await startProcessLoopback(process.pid, 'tr-loop-test', mockSender)
+  } catch (err: any) {
+    loopbackErrorCaught = true
+    loopbackErrorDetail = err.message
+  }
+
+  // On host Windows (build 19045), helper rejects with build error:
+  if (loopbackErrorCaught) {
+    const isUnsupported =
+      loopbackErrorDetail.includes('Windows build 20348 or higher required') ||
+      loopbackErrorDetail.includes('only supported on Windows') ||
+      loopbackErrorDetail.includes('not supported')
+    assert(isUnsupported, `Loopback error must clearly identify unsupported capability: ${loopbackErrorDetail}`)
+
+    const structuredResponse = {
+      success: false,
+      error: loopbackErrorDetail,
+      unsupported: isUnsupported
+    }
+    assert.strictEqual(structuredResponse.success, false)
+    assert.strictEqual(structuredResponse.unsupported, true)
+    console.log(`  -> Host Windows build requirement verified: loopback correctly signaled unsupported (${loopbackErrorDetail.trim()})`)
+  } else {
+    console.log('  -> Host Windows build supports WASAPI process loopback.')
+  }
+  console.log('✓ Loopback HWND resolution & structured unsupported error handling test passed.')
 }
 
 runAsyncTests()

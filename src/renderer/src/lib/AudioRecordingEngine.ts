@@ -272,7 +272,7 @@ export class AudioRecordingEngine {
           const isDefault = !deviceId || deviceId === 'default'
           const constraints: MediaStreamConstraints = {
             audio: {
-              deviceId: isDefault ? undefined : { ideal: deviceId },
+              deviceId: isDefault ? undefined : { exact: deviceId },
               channelCount: { ideal: 2, min: 1 },
               echoCancellation: false,
               noiseSuppression: false,
@@ -287,7 +287,8 @@ export class AudioRecordingEngine {
             } catch (constraintErr) {
               console.warn(`[AudioRecordingEngine] Preferred constraints failed for track ${track.trackId}, retrying with basic device constraints:`, constraintErr)
               stream = await navigator.mediaDevices.getUserMedia({
-                audio: isDefault ? true : { deviceId: { ideal: deviceId } }
+                audio: isDefault ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+                  : { deviceId: { exact: deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
               })
             }
 
@@ -476,7 +477,9 @@ export class AudioRecordingEngine {
         throw new Error(res?.error || `Failed to append recording chunk for track ${session.trackId}`)
       }
     }).finally(() => { session.pendingSamples -= samplesToFlush })
-    void session.writeQueue.catch(error => this.failRecording(error))
+    void session.writeQueue.catch(error => {
+      if (this.sessions.get(session.trackId) === session) this.failRecording(error)
+    })
 
     return session.writeQueue
   }
@@ -533,6 +536,7 @@ export class AudioRecordingEngine {
         }
 
         const results: RecordingResult[] = []
+        const errors: Error[] = []
         const api = typeof window !== 'undefined' ? (window as any).api : undefined
 
         for (const session of this.sessions.values()) {
@@ -575,11 +579,12 @@ export class AudioRecordingEngine {
             })
           } catch (trackErr) {
             console.error(`[AudioRecordingEngine] Error finalizing recording for track ${session.trackId}:`, trackErr)
-            throw trackErr
+            errors.push(trackErr instanceof Error ? trackErr : new Error(String(trackErr)))
           }
         }
 
         this.sessions.clear()
+        if (errors.length) throw Object.assign(new Error(errors.map(error => error.message).join('; ')), { recordings: results })
         return results
       } finally {
         this.isStoppingState = false

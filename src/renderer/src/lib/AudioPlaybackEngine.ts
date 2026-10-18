@@ -514,13 +514,6 @@ export class AudioPlaybackEngine {
   }
 
   /**
-   * Returns the count of cached audio buffers.
-   */
-  public getCacheSize(): number {
-    return this.bufferCache.size
-  }
-
-  /**
    * Clear cached audio buffers and pending load promises to free memory.
    */
   public clearCache(): void {
