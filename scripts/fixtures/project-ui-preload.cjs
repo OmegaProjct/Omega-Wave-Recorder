@@ -1,4 +1,4 @@
-window.__owrTest = { saves: [], dialogs: 0, failSave: false, deferSave: false, target: 'C:/OWR-Test/Chosen Project.owrp' }
+window.__owrTest = { saves: [], exports: [], dialogs: 0, failSave: false, deferSave: false, target: 'C:/OWR-Test/Chosen Project.owrp' }
 window.confirm = () => true
 Object.defineProperty(navigator.mediaDevices, 'enumerateDevices', { value: async () => [] })
 window.api = {
@@ -10,6 +10,10 @@ window.api = {
   getStartupFile: async () => null,
   onOpenProjectFromAssociation: () => () => {},
   onMaximizeChange: () => () => {},
+  exportProject: async (tracks, settings) => {
+    window.__owrTest.exports.push({ tracks, settings })
+    return { success: true, path: settings.path }
+  },
   showSaveDialog: async () => {
     window.__owrTest.dialogs++
     return { canceled: false, filePath: window.__owrTest.target }

@@ -719,20 +719,8 @@ export const App: React.FC = () => {
   }
 
   const handleExportAudio = async (settings: ExportSettings) => {
-    let result: any = null
-    if (window.api?.exportProject) {
-      result = await window.api.exportProject(tracks, settings)
-    } else if (window.api?.exportAudio) {
-      result = await window.api.exportAudio(tracks, settings)
-    }
-    if (settings.playAfterExport && window.api?.openPath) {
-      const pathToOpen = (result && typeof result === 'object' && result.path) ? result.path : settings.path
-      try {
-        await window.api.openPath(pathToOpen)
-      } catch (e) {
-        console.warn('Failed to play audio after export:', e)
-      }
-    }
+    if (!window.api?.exportProject) throw new Error('Audio-Export ist nicht verfügbar.')
+    await window.api.exportProject(tracks, settings)
   }
 
   // Keyboard Shortcuts Handler

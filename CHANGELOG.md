@@ -2,6 +2,20 @@
 
 The format is based on Keep a Changelog. Dieses Projekt nutzt das klassische Semantic Versioning (`X.Y.Z`).
 
+## [0.1.6] - 2026-10-18
+
+### Deutsch
+
+#### 🐛 Behoben & Verbessert
+- **Robuste Fehlerbehandlung beim Audio-Export**: `handleExportAudio` validiert nun strikt die Verfügbarkeit der Export-API und wirft eine klare Fehlermeldung, falls die Schnittstelle nicht bereitsteht.
+- **Automatisierte UI-Export-Regressionstests**: Erweiterung der Testsuite um vollständige End-to-End-Prüfung des Audio-Exports über Tastenkürzel `E`, inklusive Spurenübergabe, MP3-Konfiguration und API-Absicherung.
+
+### English
+
+#### 🐛 Fixed & Improved
+- **Robust Audio Export Error Handling**: `handleExportAudio` strictly validates export API availability and throws clear feedback if unavailable.
+- **Automated UI Export Regression Tests**: Expanded test suite with end-to-end verification of keyboard-triggered audio export (`E`), track forwarding, MP3 settings, and error propagation.
+
 ## [0.1.5] - 2026-10-18
 
 ### Deutsch

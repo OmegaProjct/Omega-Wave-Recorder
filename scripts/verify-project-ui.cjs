@@ -94,6 +94,19 @@ app.whenReady().then(async () => {
     state = await evaluate('JSON.parse(JSON.stringify(window.__owrTest))')
     assert.equal(state.saves[5].data.tracks[0].regions.length, 0)
     assert.equal(state.saves[5].data.tracks[1].inputSource.type, 'device', 'New must retain the existing device defaults')
+    await key('e')
+    await waitFor('!!document.querySelector("form")')
+    await evaluate('document.querySelector("form").dispatchEvent(new Event("submit", {bubbles:true,cancelable:true}))')
+    await waitFor('window.__owrTest.exports.length === 1 && !document.querySelector("form")')
+    state = await evaluate('JSON.parse(JSON.stringify(window.__owrTest))')
+    assert.equal(state.exports[0].tracks.length, 4, 'UI export must forward the actual project tracks')
+    assert.equal(state.exports[0].tracks[0].id, 'track-1')
+    assert.equal(state.exports[0].settings.format, 'mp3')
+    await evaluate('delete window.api.exportProject')
+    await key('e')
+    await waitFor('!!document.querySelector("form")')
+    await evaluate('document.querySelector("form").dispatchEvent(new Event("submit", {bubbles:true,cancelable:true}))')
+    await waitFor('document.body.innerText.includes("Audio-Export ist nicht verfügbar")')
     console.log('PASS: rendered project UI saves exact paths, reports failed writes, retains unsaved edits, and resets history on Open/New.')
   } catch (error) {
     console.error(error)
@@ -103,4 +116,3 @@ app.whenReady().then(async () => {
     app.exit(failed ? 1 : 0)
   }
 }).catch(error => { console.error(error); app.exit(1) })
-

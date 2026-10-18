@@ -198,7 +198,7 @@ export function UpdateModal({ updateInfo, onClose }: UpdateModalProps) {
 
       setStep('checking')
       try {
-        let curr = '0.1.5'
+        let curr = '0.1.6'
         if (window.api?.getAppVersion) {
           const v = await window.api.getAppVersion()
           if (v) curr = v
@@ -475,7 +475,7 @@ export function UpdateModal({ updateInfo, onClose }: UpdateModalProps) {
     ? activeInfo.currentVersion.startsWith('v')
       ? activeInfo.currentVersion
       : `v${activeInfo.currentVersion}`
-    : 'v0.1.5'
+    : 'v0.1.6'
 
   const latestVerStr = activeInfo?.latestVersion
     ? activeInfo.latestVersion.startsWith('v')
