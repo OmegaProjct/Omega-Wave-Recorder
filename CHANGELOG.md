@@ -2,6 +2,22 @@
 
 The format is based on Keep a Changelog. Dieses Projekt nutzt das klassische Semantic Versioning (`X.Y.Z`).
 
+## [0.1.7] - 2026-10-18
+
+### Deutsch
+
+#### ✨ Neu & Verbessert
+- **Erfassung von Windows-Wiedergabegeräten & Audio-Kanälen (Loopback)**: In der Eingangsquellen-Auswahl jeder Spur steht nun die neue Kategorie `── Windows Audio-Kanäle (Loopback) ──` bereit. Hierüber können virtuelle und Hardware-Wiedergabekanäle (wie `Chat`, `Game`, `Music`, `System`, `Sample`) direkt als dedizierte Aufnahmespur ausgewählt werden.
+- **Parallele Multi-Track-Aufnahme von Sprache & Chat**: Eingehender Sprachchat (z. B. aus Discord) kann nun zeitgleich mit dem Mikrofon auf getrennten Spuren aufgezeichnet werden.
+- **WASAPI-Endpoint-Loopback mit nativer Hardware-Taktung**: Zuverlässige Audioerfassung auch bei Sprechpausen und Stille, ohne Timing-Drift oder Aussetzer.
+
+### English
+
+#### ✨ Added & Improved
+- **Windows Playback Endpoints & Audio Channels (Loopback)**: The track input source selector now includes a dedicated `── Windows Audio Channels (Loopback) ──` group. Virtual and hardware playback channels (such as `Chat`, `Game`, `Music`, `System`, `Sample`) can now be selected as independent recording tracks.
+- **Parallel Multi-Track Recording of Voice & Chat**: Record incoming voice chat (e.g. from Discord) alongside your microphone on separate, synchronized tracks.
+- **WASAPI Endpoint Loopback with Native Hardware Clocking**: Reliable loopback capture even during silent gaps without timing drift or frame loss.
+
 ## [0.1.6] - 2026-10-18
 
 ### Deutsch

@@ -15,6 +15,7 @@ interface TrackHeaderProps {
   isRecording: boolean
   livePeak?: LivePeak
   audioDevices: { deviceId: string; label: string }[]
+  outputDevices?: { deviceId: string; label: string }[]
   runningProcesses: AudioProcessInfo[]
   onToggleArm: () => void
   onToggleMute: () => void
@@ -31,6 +32,7 @@ export const TrackHeader: React.FC<TrackHeaderProps> = ({
   isRecording,
   livePeak = { peakL: 0, peakR: 0, peakLdBFS: -60, peakRdBFS: -60 },
   audioDevices,
+  outputDevices = [],
   runningProcesses,
   onToggleArm,
   onToggleMute,
@@ -82,6 +84,16 @@ export const TrackHeader: React.FC<TrackHeaderProps> = ({
         deviceId: devId,
         name: dev?.label || t('transport.system_default', 'Systemstandard'),
         label: dev?.label || t('transport.system_default', 'Systemstandard')
+      })
+    } else if (val.startsWith('loopback:')) {
+      const loopId = val.replace('loopback:', '')
+      const dev = outputDevices.find((d) => d.deviceId === loopId)
+      onInputChange({
+        type: 'loopback',
+        id: loopId,
+        deviceId: loopId,
+        name: dev?.label || 'Audio-Kanal',
+        label: dev?.label || 'Audio-Kanal'
       })
     } else if (val.startsWith('process:')) {
       const procKey = val.replace('process:', '')
@@ -149,6 +161,10 @@ export const TrackHeader: React.FC<TrackHeaderProps> = ({
             <span title={t('track.running_programs', 'Windows App-Audio Loopback')}>
               <Monitor size={13} className="text-emerald-400 shrink-0" />
             </span>
+          ) : track.inputSource?.type === 'loopback' ? (
+            <span title={t('track.windows_playback_loopback', 'Windows Audio-Kanal (Loopback)')}>
+              <Volume2 size={13} className="text-cyan-400 shrink-0" />
+            </span>
           ) : (
             <span title={t('track.hardware_devices', 'Hardware Audio-Input')}>
               <Mic size={13} className="text-omega-accent shrink-0" />
@@ -172,6 +188,16 @@ export const TrackHeader: React.FC<TrackHeaderProps> = ({
                 </option>
               ))}
             </optgroup>
+
+            {outputDevices.length > 0 && (
+              <optgroup label={`── ${t('track.windows_playback_loopback', 'Windows Audio-Kanäle (Loopback)')} ──`}>
+                {outputDevices.map((d) => (
+                  <option key={d.deviceId} value={`loopback:${d.deviceId}`}>
+                    {d.label}
+                  </option>
+                ))}
+              </optgroup>
+            )}
 
             <optgroup label={`── ${t('track.running_programs', 'Laufende Programme')} ──`}>
               {runningProcesses.length === 0 ? (

@@ -301,6 +301,11 @@ export const SingleTrackFocusView: React.FC<SingleTrackFocusViewProps> = ({
                 <Monitor size={12} className="text-emerald-400" />
                 <span>{activeTrack?.inputSource?.label || activeTrack?.inputSource?.name}</span>
               </>
+            ) : activeTrack?.inputSource?.type === 'loopback' ? (
+              <>
+                <Volume2 size={12} className="text-cyan-400" />
+                <span>{activeTrack?.inputSource?.label || activeTrack?.inputSource?.name}</span>
+              </>
             ) : (
               <>
                 <Mic size={12} className="text-omega-accent" />

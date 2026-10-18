@@ -15,6 +15,7 @@ dist-bin/
 *.ntvs*
 *.njsproj
 *.sln
+*.obj
 *.sw?
 
 # Logs

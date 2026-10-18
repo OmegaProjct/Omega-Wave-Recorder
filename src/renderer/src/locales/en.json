@@ -52,6 +52,7 @@
     "gain": "Gain",
     "select_input": "Select Input Source",
     "hardware_devices": "Hardware & Audio Devices",
+    "windows_playback_loopback": "Windows Audio Channels (Loopback)",
     "running_programs": "Running Applications (WASAPI)",
     "no_input": "No Input",
     "no_audio": "No Audio Data",

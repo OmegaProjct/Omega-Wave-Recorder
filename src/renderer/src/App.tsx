@@ -153,6 +153,7 @@ export const App: React.FC = () => {
     'track-4': { peakL: 0, peakR: 0, peakLdBFS: -60, peakRdBFS: -60 }
   })
   const [audioDevices, setAudioDevices] = useState<{ deviceId: string; label: string }[]>([])
+  const [outputDevices, setOutputDevices] = useState<{ deviceId: string; label: string }[]>([])
   const [runningProcesses, setRunningProcesses] = useState<AudioProcessInfo[]>([])
 
   // --- Modals State ---
@@ -229,6 +230,17 @@ export const App: React.FC = () => {
         }
       } catch (e) {
         console.warn('Error enumerating input devices:', e)
+      }
+
+      try {
+        if (window.api?.getRenderDevices) {
+          const renderDevs = await window.api.getRenderDevices()
+          if (Array.isArray(renderDevs) && renderDevs.length > 0) {
+            setOutputDevices(renderDevs.map((d) => ({ deviceId: d.id, label: d.name })))
+          }
+        }
+      } catch (e) {
+        console.warn('Error fetching render devices:', e)
       }
 
       try {
@@ -967,6 +979,7 @@ export const App: React.FC = () => {
                 selection={selection}
                 livePeak={livePeaks[track.id]}
                 audioDevices={audioDevices}
+                outputDevices={outputDevices}
                 runningProcesses={runningProcesses}
                 onToggleArm={() => handleToggleArm(track.id)}
                 onToggleMute={() => handleToggleMute(track.id)}

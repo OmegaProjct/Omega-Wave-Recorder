@@ -50,10 +50,10 @@ export interface Region {
 }
 
 export interface InputSource {
-  type: 'device' | 'process'
+  type: 'device' | 'process' | 'loopback'
   id: string
   name: string
-  deviceId?: string // alias for id when type === 'device'
+  deviceId?: string // alias for id when type === 'device' or 'loopback'
   processName?: string // executable name when type === 'process' (e.g. 'Spotify.exe')
   pid?: number // process ID if known
   label?: string // human readable display label
@@ -168,6 +168,7 @@ export interface AudioInputDevice {
 export interface LoopbackChunkEvent {
   trackId?: string
   pid?: number
+  deviceId?: string
   left: Float32Array | number[]
   right: Float32Array | number[]
   sampleRate?: number

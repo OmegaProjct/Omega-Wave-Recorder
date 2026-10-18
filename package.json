@@ -1,6 +1,6 @@
 {
   "name": "omega-wave-recorder",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Omega Wave Recorder - Lean Multitrack Audio Recorder for Omega Media Core",
   "main": "./out/main/index.js",
   "author": "Omega Projects <omegaproject1337@gmail.com>",

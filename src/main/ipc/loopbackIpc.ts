@@ -4,7 +4,9 @@ import { logger } from '../logger'
 import {
   resolveWindowProcessId,
   startProcessLoopback,
-  stopProcessLoopback
+  startDeviceLoopback,
+  stopProcessLoopback,
+  getRenderEndpoints
 } from './processLoopback'
 
 export interface VisibleAppWindow {
@@ -186,9 +188,20 @@ export function registerLoopbackIpc(): void {
     return { success: true }
   })
 
-  // Start loopback capture for a specific PID and track
-  ipcMain.handle('start-loopback-capture', async (event, pid: number, trackId?: string) => {
-    logger.info('Loopback', `Starte Loopback-Erfassung für PID ${pid} (Spur: ${trackId})`)
+  // Enumerate all active Windows playback endpoints for loopback
+  ipcMain.handle('get-render-devices', async () => {
+    logger.debug('Loopback', 'Scanne Windows-Wiedergabegeräte (Render-Endpoints)')
+    try {
+      return await getRenderEndpoints()
+    } catch (err: any) {
+      logger.error('Loopback', 'Fehler beim Scannen der Windows-Wiedergabegeräte', err)
+      return []
+    }
+  })
+
+  // Start loopback capture for a specific PID or Device ID and track
+  ipcMain.handle('start-loopback-capture', async (event, target: number | string, trackId?: string) => {
+    logger.info('Loopback', `Starte Loopback-Erfassung für Ziel ${target} (Spur: ${trackId})`)
     if (!trackId || typeof trackId !== 'string') {
       return {
         success: false,
@@ -198,15 +211,20 @@ export function registerLoopbackIpc(): void {
     }
 
     try {
-      const result = await startProcessLoopback(pid, trackId, event.sender)
-      return result
+      if (typeof target === 'string') {
+        const result = await startDeviceLoopback(target, trackId, event.sender)
+        return result
+      } else {
+        const result = await startProcessLoopback(target, trackId, event.sender)
+        return result
+      }
     } catch (err: any) {
       const msg = err?.message || 'WASAPI Loopback capture failed'
       const isUnsupported =
         msg.includes('Windows build 20348 or higher required') ||
         msg.includes('only supported on Windows') ||
         msg.includes('not supported')
-      logger.warn('Loopback', `Loopback nicht unterstützt oder fehlgeschlagen für PID ${pid} (Spur: ${trackId}): ${msg}`)
+      logger.warn('Loopback', `Loopback nicht unterstützt oder fehlgeschlagen für Ziel ${target} (Spur: ${trackId}): ${msg}`)
       return {
         success: false,
         error: msg,
@@ -216,10 +234,10 @@ export function registerLoopbackIpc(): void {
   })
 
   // Stop loopback capture
-  ipcMain.handle('stop-loopback-capture', async (_, pid: number, trackId?: string) => {
-    logger.info('Loopback', `Stoppe Loopback-Erfassung für PID ${pid} (Spur: ${trackId})`)
+  ipcMain.handle('stop-loopback-capture', async (_, target: number | string, trackId?: string) => {
+    logger.info('Loopback', `Stoppe Loopback-Erfassung für Ziel ${target} (Spur: ${trackId})`)
     try {
-      return await stopProcessLoopback(pid, trackId)
+      return await stopProcessLoopback(target, trackId)
     } catch (err: any) {
       logger.warn('Loopback', `Fehler beim Stoppen von Loopback: ${err.message}`)
       return { success: false, error: err.message }

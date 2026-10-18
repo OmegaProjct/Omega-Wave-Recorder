@@ -118,6 +118,30 @@ async function run() {
   const processCapture = setup({ startLoopbackCapture: async () => ({ success: false, error: 'UNSUPPORTED_OS' }) })
   await assert.rejects(processCapture.engine.startRecording([{ ...config('one'), inputSource: { type: 'process', id: '100', pid: 100, name: 'test app' } }]), /UNSUPPORTED_OS/)
   assert.equal(processCapture.engine.isRecording(), false, 'Unsupported capture must never report recording success')
+
+  const loopbackCapture = setup({
+    startLoopbackCapture: async (target: any, trackId?: string) => {
+      assert.equal(target, '{device-chat-endpoint}')
+      assert.equal(trackId, 'track-chat')
+      return { success: true, sampleRate: 48000, channels: 2 }
+    },
+    stopLoopbackCapture: async (target: any, trackId?: string) => {
+      assert.equal(target, '{device-chat-endpoint}')
+      assert.equal(trackId, 'track-chat')
+      return { success: true }
+    }
+  })
+  await loopbackCapture.engine.startRecording([{
+    trackId: 'track-chat',
+    tempFilePath: 'chat.wav',
+    inputSource: { type: 'loopback', id: '{device-chat-endpoint}', deviceId: '{device-chat-endpoint}', name: 'Chat (Audio-Kanal)' }
+  }])
+  assert.equal(loopbackCapture.engine.isRecording(), true)
+  const loopbackResults = await loopbackCapture.engine.stopRecording()
+  assert.equal(loopbackResults.length, 1)
+  assert.equal(loopbackResults[0].trackId, 'track-chat')
+  assert.equal(loopbackCapture.engine.isRecording(), false)
+
   console.log('PASS: actual recording lifecycle, write ordering/errors, 44.1kHz timing, bounded buffers, and source cleanup.')
 }
 

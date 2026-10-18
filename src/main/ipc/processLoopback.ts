@@ -6,7 +6,8 @@ import { logger } from '../logger'
 
 export interface LoopbackChunkEvent {
   trackId: string
-  pid: number
+  pid?: number
+  deviceId?: string
   left: Float32Array
   right: Float32Array
   sampleRate: number
@@ -14,7 +15,8 @@ export interface LoopbackChunkEvent {
 
 export interface LoopbackErrorEvent {
   trackId: string
-  pid: number
+  pid?: number
+  deviceId?: string
   error: string
 }
 
@@ -28,11 +30,17 @@ export interface LoopbackStopResult {
   success: true
 }
 
+export interface RenderEndpoint {
+  id: string
+  name: string
+}
+
 interface LoopbackSession {
   key: string
   rendererId: number
   trackId: string
-  pid: number
+  pid?: number
+  deviceId?: string
   child: ChildProcess
   sender: WebContents
   stopping: boolean
@@ -135,6 +143,195 @@ export async function resolveWindowProcessId(hwnd: string): Promise<number> {
         resolve(pid)
       }
     )
+  })
+}
+
+export async function getRenderEndpoints(): Promise<RenderEndpoint[]> {
+  if (process.platform !== 'win32') {
+    return []
+  }
+  const helperPath = getHelperPath()
+  return new Promise<RenderEndpoint[]>((resolve, reject) => {
+    execFile(
+      helperPath,
+      ['--list-render-devices'],
+      {
+        windowsHide: true,
+        timeout: 5000,
+        maxBuffer: 256 * 1024,
+        shell: false
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          const detail = (stderr && stderr.trim()) || error.message
+          return reject(new Error(`Failed to list render devices: ${detail}`))
+        }
+        try {
+          const parsed = JSON.parse(stdout.trim())
+          if (Array.isArray(parsed)) {
+            return resolve(parsed)
+          }
+          resolve([])
+        } catch (e: any) {
+          reject(new Error(`Failed to parse render devices JSON: ${e.message}`))
+        }
+      }
+    )
+  })
+}
+
+/**
+ * Starts WASAPI endpoint loopback audio capture for a given target playback device and track.
+ */
+export async function startDeviceLoopback(
+  deviceId: string,
+  trackId: string,
+  sender: WebContents
+): Promise<LoopbackStartResult> {
+  if (typeof deviceId !== 'string' || deviceId.trim() === '') {
+    throw new Error('Invalid deviceId: must be a non-empty string.')
+  }
+  if (typeof trackId !== 'string' || trackId.trim() === '') {
+    throw new Error('Invalid trackId: must be a non-empty string.')
+  }
+  if (!sender || typeof sender.send !== 'function' || (typeof sender.isDestroyed === 'function' && sender.isDestroyed())) {
+    throw new Error('Invalid sender: WebContents is invalid or destroyed.')
+  }
+
+  const rendererId = typeof sender.id === 'number' ? sender.id : 0
+  const sessionKey = `${rendererId}:${trackId}`
+
+  if (activeSessions.has(sessionKey)) {
+    throw new Error(`Loopback capture already active for track "${trackId}" on renderer ${rendererId}.`)
+  }
+
+  const helperPath = getHelperPath()
+  ensureBeforeQuitHook()
+
+  const child = spawn(helperPath, ['--device', deviceId.trim()], {
+    windowsHide: true,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    shell: false
+  })
+
+  if (!child.stdout || !child.stderr || !child.stdin) {
+    try { child.kill() } catch {}
+    throw new Error('Failed to spawn device loopback helper with stdio pipes.')
+  }
+
+  let stderrBuffer = ''
+  const stderrHistory: string[] = []
+  const MAX_STDERR_HISTORY = 50
+
+  function recordStderr(chunk: Buffer | string): string[] {
+    stderrBuffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+    const lines = stderrBuffer.split(/\r?\n/)
+    stderrBuffer = lines.pop() ?? ''
+    if (stderrBuffer.length > 4096) {
+      stderrBuffer = stderrBuffer.slice(-4096)
+    }
+    const completedLines: string[] = []
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (trimmed) {
+        completedLines.push(trimmed)
+        stderrHistory.push(trimmed)
+        if (stderrHistory.length > MAX_STDERR_HISTORY) {
+          stderrHistory.shift()
+        }
+      }
+    }
+    return completedLines
+  }
+
+  function getStderrDiagnostic(): string {
+    const all = [...stderrHistory]
+    if (stderrBuffer.trim()) {
+      all.push(stderrBuffer.trim())
+    }
+    const errorLine = all.slice().reverse().find((l) => l.startsWith('Error:') || l.includes('Error'))
+    if (errorLine) return errorLine
+    return all.slice(-3).join('; ')
+  }
+
+  const session: LoopbackSession = {
+    key: sessionKey,
+    rendererId,
+    trackId,
+    deviceId: deviceId.trim(),
+    child,
+    sender,
+    stopping: false,
+    exited: false,
+    exitCode: null,
+    exitError: null
+  }
+
+  activeSessions.set(sessionKey, session)
+
+  return new Promise<LoopbackStartResult>((resolve, reject) => {
+    let startupTimer: NodeJS.Timeout | null = null
+
+    const cleanupStartup = () => {
+      if (startupTimer) {
+        clearTimeout(startupTimer)
+        startupTimer = null
+      }
+      child.stderr?.removeListener('data', onStartupStderr)
+      child.removeListener('error', onStartupError)
+      child.removeListener('exit', onStartupExit)
+      try {
+        sender.removeListener('destroyed', onStartupSenderDestroyed)
+      } catch {}
+    }
+
+    const onStartupStderr = (chunk: Buffer) => {
+      const lines = recordStderr(chunk)
+      for (const line of lines) {
+        if (line === 'READY 48000 2') {
+          cleanupStartup()
+          setupRunningCapture(session, recordStderr, getStderrDiagnostic)
+          resolve({ success: true, sampleRate: 48000, channels: 2 })
+          return
+        }
+      }
+    }
+
+    const onStartupError = (err: Error) => {
+      cleanupStartup()
+      activeSessions.delete(sessionKey)
+      try { child.kill() } catch {}
+      reject(new Error(`Failed to start device loopback helper: ${err.message}`))
+    }
+
+    const onStartupExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      cleanupStartup()
+      activeSessions.delete(sessionKey)
+      const diag = getStderrDiagnostic() || `Helper process exited prematurely (code: ${code}, signal: ${signal})`
+      reject(new Error(`Failed to start device loopback: ${diag}`))
+    }
+
+    const onStartupSenderDestroyed = () => {
+      cleanupStartup()
+      activeSessions.delete(sessionKey)
+      try { child.kill() } catch {}
+      reject(new Error('Sender WebContents was destroyed during device loopback startup'))
+    }
+
+    child.stderr.on('data', onStartupStderr)
+    child.once('error', onStartupError)
+    child.once('exit', onStartupExit)
+    if (typeof sender.once === 'function') {
+      sender.once('destroyed', onStartupSenderDestroyed)
+    }
+
+    startupTimer = setTimeout(() => {
+      cleanupStartup()
+      activeSessions.delete(sessionKey)
+      try { child.kill() } catch {}
+      const diag = getStderrDiagnostic() || 'Timeout waiting for READY handshake'
+      reject(new Error(`Timeout starting device loopback: ${diag}`))
+    }, 5000)
   })
 }
 
@@ -304,7 +501,7 @@ function setupRunningCapture(
   recordStderr: (chunk: Buffer | string) => string[],
   getStderrDiagnostic: () => string
 ): void {
-  const { child, sender, trackId, pid } = session
+  const { child, sender, trackId, pid, deviceId } = session
 
   let pcmBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0)
   const MAX_BUFFERED_BYTES = 2 * 1024 * 1024 // 2MB safety bound
@@ -314,13 +511,14 @@ function setupRunningCapture(
     if (session.stopping || runtimeErrorEmitted) return
     runtimeErrorEmitted = true
 
-    logger?.error('ProcessLoopback', `Runtime error in capture for PID ${pid} track ${trackId}: ${err.message}`)
+    logger?.error('ProcessLoopback', `Runtime error in capture for ${deviceId || `PID ${pid}`} track ${trackId}: ${err.message}`)
 
     if (!sender.isDestroyed()) {
       try {
         sender.send('loopback-error', {
           trackId,
           pid,
+          deviceId,
           error: err.message
         })
       } catch {}
@@ -383,6 +581,7 @@ function setupRunningCapture(
           sender.send('loopback-chunk', {
             trackId,
             pid,
+            deviceId,
             left,
             right,
             sampleRate: 48000
@@ -512,15 +711,16 @@ async function stopSession(session: LoopbackSession, forceKill: boolean = false)
 }
 
 /**
- * Stops active WASAPI process loopback capture session(s).
- * If trackId is omitted, stops all sessions associated with the given PID.
+ * Stops active WASAPI process or device loopback capture session(s).
+ * If trackId is omitted, stops all sessions associated with the given target PID or device ID.
  */
 export async function stopProcessLoopback(
-  pid: number,
+  target: number | string,
   trackId?: string
 ): Promise<LoopbackStopResult> {
-  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0 || pid > 0xFFFFFFFF) {
-    throw new Error(`Invalid PID: "${pid}". Must be a positive 32-bit integer.`)
+  const isPid = typeof target === 'number'
+  if (isPid && (!Number.isInteger(target) || target <= 0 || target > 0xFFFFFFFF)) {
+    throw new Error(`Invalid PID: "${target}". Must be a positive 32-bit integer.`)
   }
 
   if (trackId !== undefined && (typeof trackId !== 'string' || trackId.trim() === '')) {
@@ -529,7 +729,11 @@ export async function stopProcessLoopback(
 
   const matchingSessions: LoopbackSession[] = []
   for (const session of activeSessions.values()) {
-    if (session.pid === pid) {
+    const match = isPid
+      ? session.pid === target
+      : session.deviceId === target || session.trackId === target
+
+    if (match) {
       if (trackId === undefined || session.trackId === trackId) {
         matchingSessions.push(session)
       }

@@ -761,6 +761,64 @@ async function runTests() {
     console.log('  -> PASS: Sender destroyed and before-quit hooks clean resources without leaks.')
   }
 
+  // =========================================================================
+  // TEST GROUP 9: Windows Playback & Endpoint Loopback (Render Endpoints)
+  // =========================================================================
+  console.log('[Test 9] Windows Playback endpoints enumeration & device loopback...')
+  {
+    // 9.1 getRenderEndpoints mock verification
+    const mockCP_Render = {
+      execFile: (file, args, opts, cb) => {
+        assert.ok(args.includes('--list-render-devices'))
+        process.nextTick(() => {
+          cb(null, JSON.stringify([
+            { id: '{endpoint-chat}', name: 'Chat (Audio-Kanal)' },
+            { id: '{endpoint-music}', name: 'Music (Audio-Kanal)' }
+          ]), '')
+        })
+      }
+    }
+    const serviceRender = createServiceInstance(null, mockCP_Render)
+    const endpoints = await serviceRender.getRenderEndpoints()
+    assert.equal(endpoints.length, 2)
+    assert.equal(endpoints[0].id, '{endpoint-chat}')
+    assert.equal(endpoints[0].name, 'Chat (Audio-Kanal)')
+
+    // 9.2 startDeviceLoopback & streaming chunks with deviceId
+    let deviceChild = null
+    const mockCP_Dev = {
+      spawn: (file, args, opts) => {
+        assert.equal(args[0], '--device')
+        assert.equal(args[1], '{endpoint-chat}')
+        deviceChild = new MockChildProcess(file, args, opts)
+        process.nextTick(() => deviceChild.pushStderr('READY 48000 2\n'))
+        deviceChild.on('stdin-end', () => deviceChild.simulateExit(0))
+        return deviceChild
+      }
+    }
+    const serviceDev = createServiceInstance(null, mockCP_Dev)
+    const senderDev = new MockWebContents(90)
+    const startRes = await serviceDev.startDeviceLoopback('{endpoint-chat}', 'track-chat', senderDev)
+    assert.equal(startRes.success, true)
+    assert.equal(startRes.sampleRate, 48000)
+
+    // Push audio packet and verify deviceId attached in chunk event
+    const pkt = createStereoPacket([0.5, 0.6], [0.7, 0.8])
+    deviceChild.pushStdout(pkt)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    const chunkMsg = senderDev.messages.find((m) => m.channel === 'loopback-chunk' && m.data?.trackId === 'track-chat')
+    assert.ok(chunkMsg, 'Should dispatch loopback-chunk for device loopback')
+    assert.equal(chunkMsg.data.deviceId, '{endpoint-chat}')
+    assert.equal(chunkMsg.data.left.length, 2)
+
+    // Stop device loopback
+    await serviceDev.stopProcessLoopback('{endpoint-chat}', 'track-chat')
+    assert.equal(deviceChild.stdinData.includes('stop\n'), true)
+
+    console.log('  -> PASS: Windows Playback endpoints enumeration and device loopback verified.')
+  }
+
   console.log('\n>>> ALL PROCESS-LOOPBACK REGRESSION TESTS PASSED DETERMINISTICALLY! <<<')
 }
 

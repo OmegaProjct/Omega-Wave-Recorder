@@ -16,6 +16,7 @@ interface TrackLaneProps {
   selection: { start: number; end: number } | null
   livePeak?: LivePeak
   audioDevices: { deviceId: string; label: string }[]
+  outputDevices?: { deviceId: string; label: string }[]
   runningProcesses: AudioProcessInfo[]
   onToggleArm: () => void
   onToggleMute: () => void
@@ -42,6 +43,7 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
   selection,
   livePeak,
   audioDevices,
+  outputDevices = [],
   runningProcesses,
   onToggleArm,
   onToggleMute,
@@ -306,6 +308,7 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
         isRecording={isRecording}
         livePeak={livePeak}
         audioDevices={audioDevices}
+        outputDevices={outputDevices}
         runningProcesses={runningProcesses}
         onToggleArm={onToggleArm}
         onToggleMute={onToggleMute}

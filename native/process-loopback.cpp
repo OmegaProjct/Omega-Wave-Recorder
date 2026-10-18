@@ -22,6 +22,7 @@
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <audioclientactivationparams.h>
+#include <functiondiscoverykeys_devpkey.h>
 #include <ksmedia.h>
 #include <avrt.h>
 #pragma warning(pop)
@@ -821,11 +822,468 @@ int RunCapture(DWORD pid) {
     return captureResult;
 }
 
+std::string EscapeJsonString(const std::wstring& wstr) {
+    int utf8Len = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (utf8Len <= 0) return "";
+    std::string utf8(utf8Len - 1, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &utf8[0], utf8Len, nullptr, nullptr);
+
+    std::string res;
+    res.reserve(utf8.size() + 16);
+    for (char c : utf8) {
+        if (c == '"') res += "\\\"";
+        else if (c == '\\') res += "\\\\";
+        else if (c == '\b') res += "\\b";
+        else if (c == '\f') res += "\\f";
+        else if (c == '\n') res += "\\n";
+        else if (c == '\r') res += "\\r";
+        else if (c == '\t') res += "\\t";
+        else if (static_cast<unsigned char>(c) < 0x20) {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+            res += buf;
+        } else {
+            res += c;
+        }
+    }
+    return res;
+}
+
+int RunListRenderDevices() {
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    if (FAILED(hr)) {
+        fprintf(stderr, "Error: CoInitializeEx failed with HRESULT 0x%08lX\n", hr);
+        return 1;
+    }
+
+    IMMDeviceEnumerator* pEnum = nullptr;
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&pEnum));
+    if (FAILED(hr) || !pEnum) {
+        fprintf(stderr, "Error: CoCreateInstance(MMDeviceEnumerator) failed with HRESULT 0x%08lX\n", hr);
+        CoUninitialize();
+        return 1;
+    }
+
+    IMMDeviceCollection* pColl = nullptr;
+    hr = pEnum->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &pColl);
+    if (FAILED(hr) || !pColl) {
+        fprintf(stderr, "Error: EnumAudioEndpoints failed with HRESULT 0x%08lX\n", hr);
+        pEnum->Release();
+        CoUninitialize();
+        return 1;
+    }
+
+    UINT count = 0;
+    pColl->GetCount(&count);
+
+    std::string json = "[";
+    bool first = true;
+
+    for (UINT i = 0; i < count; i++) {
+        IMMDevice* pDevice = nullptr;
+        if (FAILED(pColl->Item(i, &pDevice)) || !pDevice) continue;
+
+        LPWSTR pId = nullptr;
+        pDevice->GetId(&pId);
+
+        std::wstring friendlyName = L"Audio-Wiedergabe";
+        IPropertyStore* pProps = nullptr;
+        if (SUCCEEDED(pDevice->OpenPropertyStore(STGM_READ, &pProps)) && pProps) {
+            PROPVARIANT var;
+            PropVariantInit(&var);
+            if (SUCCEEDED(pProps->GetValue(PKEY_Device_FriendlyName, &var)) && var.pwszVal) {
+                friendlyName = var.pwszVal;
+            }
+            PropVariantClear(&var);
+            pProps->Release();
+        }
+
+        if (pId) {
+            if (!first) json += ",";
+            first = false;
+
+            json += "{\"id\":\"";
+            json += EscapeJsonString(pId);
+            json += "\",\"name\":\"";
+            json += EscapeJsonString(friendlyName);
+            json += "\"}";
+
+            CoTaskMemFree(pId);
+        }
+
+        pDevice->Release();
+    }
+
+    json += "]\n";
+    pColl->Release();
+    pEnum->Release();
+    CoUninitialize();
+
+    fputs(json.c_str(), stdout);
+    fflush(stdout);
+    return 0;
+}
+
+IMMDevice* FindRenderDevice(IMMDeviceEnumerator* pEnum, const char* deviceIdOrName) {
+    if (!deviceIdOrName || *deviceIdOrName == '\0') return nullptr;
+
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, deviceIdOrName, -1, nullptr, 0);
+    if (wlen <= 0) return nullptr;
+    std::wstring wtarget(wlen - 1, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, deviceIdOrName, -1, &wtarget[0], wlen);
+
+    if (_stricmp(deviceIdOrName, "default") == 0) {
+        IMMDevice* pDef = nullptr;
+        if (SUCCEEDED(pEnum->GetDefaultAudioEndpoint(eRender, eConsole, &pDef))) {
+            return pDef;
+        }
+    }
+
+    IMMDevice* pDev = nullptr;
+    if (SUCCEEDED(pEnum->GetDevice(wtarget.c_str(), &pDev)) && pDev) {
+        return pDev;
+    }
+
+    IMMDeviceCollection* pColl = nullptr;
+    if (FAILED(pEnum->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &pColl)) || !pColl) {
+        return nullptr;
+    }
+
+    UINT count = 0;
+    pColl->GetCount(&count);
+    IMMDevice* matchedDevice = nullptr;
+
+    for (UINT i = 0; i < count; i++) {
+        IMMDevice* pCandidate = nullptr;
+        if (FAILED(pColl->Item(i, &pCandidate)) || !pCandidate) continue;
+
+        LPWSTR pId = nullptr;
+        pCandidate->GetId(&pId);
+
+        std::wstring friendlyName;
+        IPropertyStore* pProps = nullptr;
+        if (SUCCEEDED(pCandidate->OpenPropertyStore(STGM_READ, &pProps)) && pProps) {
+            PROPVARIANT var;
+            PropVariantInit(&var);
+            if (SUCCEEDED(pProps->GetValue(PKEY_Device_FriendlyName, &var)) && var.pwszVal) {
+                friendlyName = var.pwszVal;
+            }
+            PropVariantClear(&var);
+            pProps->Release();
+        }
+
+        bool match = false;
+        if (pId && _wcsicmp(pId, wtarget.c_str()) == 0) {
+            match = true;
+        } else if (!friendlyName.empty() && (_wcsicmp(friendlyName.c_str(), wtarget.c_str()) == 0 || wcsstr(friendlyName.c_str(), wtarget.c_str()) != nullptr)) {
+            match = true;
+        }
+
+        if (pId) CoTaskMemFree(pId);
+
+        if (match) {
+            matchedDevice = pCandidate;
+            break;
+        }
+        pCandidate->Release();
+    }
+
+    pColl->Release();
+    return matchedDevice;
+}
+
+int RunDeviceCapture(const char* deviceIdOrName) {
+    if (!deviceIdOrName || *deviceIdOrName == '\0') {
+        fprintf(stderr, "Error: Missing device identifier for --device.\n");
+        return 1;
+    }
+
+    if (_setmode(_fileno(stdout), _O_BINARY) == -1) {
+        fprintf(stderr, "Error: Failed to set stdout to binary mode.\n");
+        return 1;
+    }
+
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    if (FAILED(hr)) {
+        fprintf(stderr, "Error: CoInitializeEx failed with HRESULT 0x%08lX\n", hr);
+        return 1;
+    }
+
+    IMMDeviceEnumerator* pEnum = nullptr;
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&pEnum));
+    if (FAILED(hr) || !pEnum) {
+        fprintf(stderr, "Error: CoCreateInstance(MMDeviceEnumerator) failed with HRESULT 0x%08lX\n", hr);
+        CoUninitialize();
+        return 1;
+    }
+
+    IMMDevice* pDevice = FindRenderDevice(pEnum, deviceIdOrName);
+    pEnum->Release();
+    pEnum = nullptr;
+
+    if (!pDevice) {
+        fprintf(stderr, "Error: Could not locate active audio render device '%s'.\n", deviceIdOrName);
+        CoUninitialize();
+        return 1;
+    }
+
+    // Keep render endpoint active with a silent render stream so loopback clock ticks continuously
+    IAudioClient* pRenderAudioClient = nullptr;
+    hr = pDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(&pRenderAudioClient));
+    if (SUCCEEDED(hr) && pRenderAudioClient) {
+        WAVEFORMATEX* pwfxRender = nullptr;
+        if (SUCCEEDED(pRenderAudioClient->GetMixFormat(&pwfxRender)) && pwfxRender) {
+            hr = pRenderAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 1000000, 0, pwfxRender, nullptr);
+            if (SUCCEEDED(hr)) {
+                IAudioRenderClient* pRenderClient = nullptr;
+                if (SUCCEEDED(pRenderAudioClient->GetService(__uuidof(IAudioRenderClient), reinterpret_cast<void**>(&pRenderClient))) && pRenderClient) {
+                    UINT32 bufferFrameCount = 0;
+                    if (SUCCEEDED(pRenderAudioClient->GetBufferSize(&bufferFrameCount)) && bufferFrameCount > 0) {
+                        BYTE* pRenderData = nullptr;
+                        if (SUCCEEDED(pRenderClient->GetBuffer(bufferFrameCount, &pRenderData)) && pRenderData) {
+                            pRenderClient->ReleaseBuffer(bufferFrameCount, AUDCLNT_BUFFERFLAGS_SILENT);
+                        }
+                    }
+                    pRenderAudioClient->Start();
+                    pRenderClient->Release();
+                }
+            }
+            CoTaskMemFree(pwfxRender);
+        }
+    }
+
+    // Activate loopback capture client
+    IAudioClient* pCaptureAudioClient = nullptr;
+    hr = pDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(&pCaptureAudioClient));
+    if (FAILED(hr) || !pCaptureAudioClient) {
+        fprintf(stderr, "Error: Activate loopback IAudioClient failed with HRESULT 0x%08lX\n", hr);
+        if (pRenderAudioClient) { pRenderAudioClient->Stop(); pRenderAudioClient->Release(); }
+        pDevice->Release();
+        CoUninitialize();
+        return 1;
+    }
+
+    WAVEFORMATEXTENSIBLE wfx = {};
+    wfx.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+    wfx.Format.nChannels = NUM_CHANNELS;
+    wfx.Format.nSamplesPerSec = SAMPLE_RATE;
+    wfx.Format.wBitsPerSample = sizeof(float) * 8;
+    wfx.Format.nBlockAlign = (wfx.Format.nChannels * wfx.Format.wBitsPerSample) / 8;
+    wfx.Format.nAvgBytesPerSec = wfx.Format.nSamplesPerSec * wfx.Format.nBlockAlign;
+    wfx.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+    wfx.Samples.wValidBitsPerSample = sizeof(float) * 8;
+    wfx.dwChannelMask = SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
+    wfx.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
+
+    REFERENCE_TIME hnsBufferDuration = 1000000; // 100 ms buffer
+    DWORD streamFlags = AUDCLNT_STREAMFLAGS_LOOPBACK |
+                        AUDCLNT_STREAMFLAGS_EVENTCALLBACK |
+                        AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
+                        AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
+
+    hr = pCaptureAudioClient->Initialize(
+        AUDCLNT_SHAREMODE_SHARED,
+        streamFlags,
+        hnsBufferDuration,
+        0,
+        reinterpret_cast<WAVEFORMATEX*>(&wfx),
+        nullptr
+    );
+
+    if (FAILED(hr)) {
+        streamFlags = AUDCLNT_STREAMFLAGS_LOOPBACK |
+                      AUDCLNT_STREAMFLAGS_EVENTCALLBACK |
+                      AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
+        hr = pCaptureAudioClient->Initialize(
+            AUDCLNT_SHAREMODE_SHARED,
+            streamFlags,
+            hnsBufferDuration,
+            0,
+            reinterpret_cast<WAVEFORMATEX*>(&wfx),
+            nullptr
+        );
+    }
+
+    if (FAILED(hr)) {
+        WAVEFORMATEX* pMix = nullptr;
+        if (SUCCEEDED(pCaptureAudioClient->GetMixFormat(&pMix)) && pMix) {
+            hr = pCaptureAudioClient->Initialize(
+                AUDCLNT_SHAREMODE_SHARED,
+                AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                hnsBufferDuration,
+                0,
+                pMix,
+                nullptr
+            );
+            CoTaskMemFree(pMix);
+        }
+    }
+
+    if (FAILED(hr)) {
+        fprintf(stderr, "Error: Loopback IAudioClient::Initialize failed with HRESULT 0x%08lX\n", hr);
+        pCaptureAudioClient->Release();
+        if (pRenderAudioClient) { pRenderAudioClient->Stop(); pRenderAudioClient->Release(); }
+        pDevice->Release();
+        CoUninitialize();
+        return 1;
+    }
+
+    HANDLE hAudioEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!hAudioEvent) {
+        fprintf(stderr, "Error: Failed to create audio buffer event.\n");
+        pCaptureAudioClient->Release();
+        if (pRenderAudioClient) { pRenderAudioClient->Stop(); pRenderAudioClient->Release(); }
+        pDevice->Release();
+        CoUninitialize();
+        return 1;
+    }
+
+    hr = pCaptureAudioClient->SetEventHandle(hAudioEvent);
+    if (FAILED(hr)) {
+        fprintf(stderr, "Error: SetEventHandle failed with HRESULT 0x%08lX\n", hr);
+        CloseHandle(hAudioEvent);
+        pCaptureAudioClient->Release();
+        if (pRenderAudioClient) { pRenderAudioClient->Stop(); pRenderAudioClient->Release(); }
+        pDevice->Release();
+        CoUninitialize();
+        return 1;
+    }
+
+    IAudioCaptureClient* pCaptureClient = nullptr;
+    hr = pCaptureAudioClient->GetService(__uuidof(IAudioCaptureClient), reinterpret_cast<void**>(&pCaptureClient));
+    if (FAILED(hr) || !pCaptureClient) {
+        fprintf(stderr, "Error: GetService(IAudioCaptureClient) failed with HRESULT 0x%08lX\n", hr);
+        CloseHandle(hAudioEvent);
+        pCaptureAudioClient->Release();
+        if (pRenderAudioClient) { pRenderAudioClient->Stop(); pRenderAudioClient->Release(); }
+        pDevice->Release();
+        CoUninitialize();
+        return 1;
+    }
+
+    hr = pCaptureAudioClient->Start();
+    if (FAILED(hr)) {
+        fprintf(stderr, "Error: Loopback IAudioClient::Start failed with HRESULT 0x%08lX\n", hr);
+        pCaptureClient->Release();
+        CloseHandle(hAudioEvent);
+        pCaptureAudioClient->Release();
+        if (pRenderAudioClient) { pRenderAudioClient->Stop(); pRenderAudioClient->Release(); }
+        pDevice->Release();
+        CoUninitialize();
+        return 1;
+    }
+
+    // Emit READY handshake strictly to stderr
+    fprintf(stderr, "READY 48000 2\n");
+    fflush(stderr);
+
+    g_hStopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+    HANDLE hStdinThread = CreateThread(nullptr, 0, StdinMonitorThreadProc, nullptr, 0, nullptr);
+
+    HANDLE waitHandles[2] = { g_hStopEvent, hAudioEvent };
+    bool loopRunning = true;
+    int captureResult = 0;
+
+    while (loopRunning && !g_bStopRequested.load()) {
+        DWORD waitRes = WaitForMultipleObjects(2, waitHandles, FALSE, 250);
+        if (waitRes == WAIT_FAILED) {
+            fprintf(stderr, "Error: Device loopback wait failed: %lu\n", GetLastError());
+            captureResult = 1;
+            break;
+        }
+
+        if (waitRes == WAIT_OBJECT_0) {
+            break;
+        }
+
+        UINT32 nextPacketSize = 0;
+        HRESULT hrPkt = pCaptureClient->GetNextPacketSize(&nextPacketSize);
+        while (SUCCEEDED(hrPkt) && nextPacketSize > 0) {
+            BYTE* pData = nullptr;
+            UINT32 numFramesRead = 0;
+            DWORD dwFlags = 0;
+            UINT64 u64DevicePosition = 0;
+            UINT64 u64QPCPosition = 0;
+
+            HRESULT hrBuf = pCaptureClient->GetBuffer(
+                &pData,
+                &numFramesRead,
+                &dwFlags,
+                &u64DevicePosition,
+                &u64QPCPosition
+            );
+
+            if (hrBuf == AUDCLNT_S_BUFFER_EMPTY) {
+                break;
+            }
+            if (FAILED(hrBuf)) {
+                fprintf(stderr, "Error: GetBuffer failed: 0x%08lX\n", hrBuf);
+                captureResult = 1;
+                loopRunning = false;
+                break;
+            }
+
+            bool isSilent = (dwFlags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
+            const float* samples = reinterpret_cast<const float*>(pData);
+
+            if (numFramesRead > 0) {
+                if (!WriteFramedPacketChunks(stdout, samples, numFramesRead, isSilent)) {
+                    loopRunning = false;
+                    pCaptureClient->ReleaseBuffer(numFramesRead);
+                    break;
+                }
+            }
+
+            pCaptureClient->ReleaseBuffer(numFramesRead);
+            hrPkt = pCaptureClient->GetNextPacketSize(&nextPacketSize);
+        }
+        if (FAILED(hrPkt)) {
+            fprintf(stderr, "Error: GetNextPacketSize failed: 0x%08lX\n", hrPkt);
+            captureResult = 1;
+            break;
+        }
+    }
+
+    g_bStopRequested.store(true);
+    if (g_hStopEvent) SetEvent(g_hStopEvent);
+
+    pCaptureAudioClient->Stop();
+    pCaptureClient->Release();
+    pCaptureAudioClient->Release();
+    CloseHandle(hAudioEvent);
+
+    if (pRenderAudioClient) {
+        pRenderAudioClient->Stop();
+        pRenderAudioClient->Release();
+        pRenderAudioClient = nullptr;
+    }
+
+    pDevice->Release();
+    pDevice = nullptr;
+
+    if (hStdinThread) {
+        CancelSynchronousIo(hStdinThread);
+        WaitForSingleObject(hStdinThread, 200);
+        CloseHandle(hStdinThread);
+    }
+
+    if (g_hStopEvent) {
+        CloseHandle(g_hStopEvent);
+        g_hStopEvent = nullptr;
+    }
+
+    CoUninitialize();
+    return captureResult;
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Usage:\n");
         fprintf(stderr, "  process-loopback.exe --self-test\n");
         fprintf(stderr, "  process-loopback.exe --resolve-window <HWND>\n");
+        fprintf(stderr, "  process-loopback.exe --list-render-devices\n");
+        fprintf(stderr, "  process-loopback.exe --device <DEVICE_ID_OR_NAME>\n");
         fprintf(stderr, "  process-loopback.exe --pid <PID>\n");
         return 1;
     }
@@ -845,6 +1303,19 @@ int main(int argc, char* argv[]) {
         return RunResolveWindow(argv[2]);
     }
 
+    if (strcmp(mode, "--list-render-devices") == 0) {
+        if (argc != 2) return 1;
+        return RunListRenderDevices();
+    }
+
+    if (strcmp(mode, "--device") == 0) {
+        if (argc != 3) {
+            fprintf(stderr, "Error: Missing device argument for --device.\n");
+            return 1;
+        }
+        return RunDeviceCapture(argv[2]);
+    }
+
     if (strcmp(mode, "--pid") == 0) {
         if (argc != 3) {
             fprintf(stderr, "Error: Missing PID argument for --pid.\n");
@@ -861,3 +1332,4 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "Error: Unknown argument '%s'.\n", mode);
     return 1;
 }
+

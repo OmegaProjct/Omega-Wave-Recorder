@@ -52,6 +52,7 @@
     "gain": "Pegel",
     "select_input": "Eingangsquelle wählen",
     "hardware_devices": "Hardware & Audiogeräte",
+    "windows_playback_loopback": "Windows Audio-Kanäle (Loopback)",
     "running_programs": "Laufende Programme (WASAPI)",
     "no_input": "Kein Eingang",
     "no_audio": "Keine Audiodaten",

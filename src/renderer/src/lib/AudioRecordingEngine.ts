@@ -236,7 +236,7 @@ export class AudioRecordingEngine {
           trackId: track.trackId,
           inputSource: track.inputSource,
           tempFilePath: track.tempFilePath,
-          sampleRate: track.inputSource.type === 'process' ? 48000 : actualSampleRate,
+          sampleRate: (track.inputSource.type === 'process' || track.inputSource.type === 'loopback') ? 48000 : actualSampleRate,
           channels: 2,
           totalSamples: 0,
           unwrittenL: [],
@@ -336,6 +336,21 @@ export class AudioRecordingEngine {
           } else {
             throw new Error(`Keine gültige Programmquelle für Spur ${track.trackId}. Bitte das Programm erneut auswählen.`)
           }
+        } else if (track.inputSource.type === 'loopback') {
+          // Windows Audio-Wiedergabe & Audio-Kanäle Loopback
+          const devId = track.inputSource.deviceId || track.inputSource.id
+          if (devId && api?.startLoopbackCapture) {
+            try {
+              const started = await api.startLoopbackCapture(devId, track.trackId)
+              if (!started?.success) throw new Error(started?.error || 'Kanal-Loopback-Aufnahme konnte nicht gestartet werden.')
+              this.sessions.set(track.trackId, session)
+            } catch (err) {
+              console.warn(`[AudioRecordingEngine] Failed to start WASAPI loopback for device ${devId}:`, err)
+              throw err
+            }
+          } else {
+            throw new Error(`Keine gültige Audio-Kanalquelle für Spur ${track.trackId}. Bitte die Quelle erneut auswählen.`)
+          }
         }
       }
 
@@ -343,15 +358,17 @@ export class AudioRecordingEngine {
         throw new Error('Kein Audiogerät konnte für die Aufnahme initialisiert werden.')
       }
 
-      // Attach loopback chunk IPC listener if any process tracks exist
-      const hasProcessTracks = tracks.some((t) => t.inputSource.type === 'process')
-      if (hasProcessTracks && api?.onLoopbackChunk) {
+      // Attach loopback chunk IPC listener if any process or loopback tracks exist
+      const hasLoopbackTracks = tracks.some((t) => t.inputSource.type === 'process' || t.inputSource.type === 'loopback')
+      if (hasLoopbackTracks && api?.onLoopbackChunk) {
         this.loopbackCleanup = api.onLoopbackChunk((event: LoopbackChunkEvent) => {
           for (const session of this.sessions.values()) {
-            const matches = event.trackId ? session.trackId === event.trackId : event.pid && session.inputSource.pid === event.pid
+            const matches = event.trackId
+              ? session.trackId === event.trackId
+              : (event.pid && session.inputSource.pid === event.pid) || (event.deviceId && (session.inputSource.id === event.deviceId || session.inputSource.deviceId === event.deviceId))
             if (matches) {
               if (event.sampleRate && event.sampleRate !== session.sampleRate) {
-                this.failRecording(new Error('Die Abtastrate der Programmaufnahme hat sich geändert.'))
+                this.failRecording(new Error('Die Abtastrate der Loopback-Aufnahme hat sich geändert.'))
                 return
               }
               const left = event.left instanceof Float32Array ? event.left : new Float32Array(event.left)
@@ -361,7 +378,7 @@ export class AudioRecordingEngine {
           }
         })
       }
-      if (hasProcessTracks && api?.onLoopbackError) {
+      if (hasLoopbackTracks && api?.onLoopbackError) {
         const chunkCleanup = this.loopbackCleanup
         const errorCleanup = api.onLoopbackError((event: { trackId: string; error: string }) => {
           if (this.sessions.has(event.trackId)) this.failRecording(new Error(event.error))
@@ -636,6 +653,12 @@ export class AudioRecordingEngine {
       const api = typeof window !== 'undefined' ? (window as any).api : undefined
       if (pid && api?.stopLoopbackCapture) {
         api.stopLoopbackCapture(pid, session.trackId).catch(() => {})
+      }
+    } else if (session.inputSource.type === 'loopback') {
+      const devId = session.inputSource.deviceId || session.inputSource.id
+      const api = typeof window !== 'undefined' ? (window as any).api : undefined
+      if (devId && api?.stopLoopbackCapture) {
+        api.stopLoopbackCapture(devId, session.trackId).catch(() => {})
       }
     }
   }

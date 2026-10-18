@@ -99,6 +99,8 @@ const api = {
   // Loopback & Window Enumeration
   getVisibleWindows: (): Promise<VisibleAppWindow[]> => ipcRenderer.invoke('get-visible-windows'),
   getAudioProcesses: (): Promise<VisibleAppWindow[]> => ipcRenderer.invoke('get-visible-windows'),
+  getRenderDevices: (): Promise<Array<{ id: string; name: string }>> => ipcRenderer.invoke('get-render-devices'),
+  getOutputDevices: (): Promise<Array<{ id: string; name: string }>> => ipcRenderer.invoke('get-render-devices'),
   startProcessMonitoring: (payload: { processName: string; pid?: number }) =>
     ipcRenderer.invoke('start-process-monitoring', payload),
   stopProcessMonitoring: (payload: { processName: string; pid?: number }) =>
@@ -176,10 +178,10 @@ const api = {
   },
 
   // Real-time chunk streaming & loopback capture for AudioRecordingEngine
-  startLoopbackCapture: (pid: number, trackId?: string) =>
-    ipcRenderer.invoke('start-loopback-capture', pid, trackId),
-  stopLoopbackCapture: (pid: number, trackId?: string) =>
-    ipcRenderer.invoke('stop-loopback-capture', pid, trackId),
+  startLoopbackCapture: (target: number | string, trackId?: string) =>
+    ipcRenderer.invoke('start-loopback-capture', target, trackId),
+  stopLoopbackCapture: (target: number | string, trackId?: string) =>
+    ipcRenderer.invoke('stop-loopback-capture', target, trackId),
   onLoopbackChunk: (callback: (data: any) => void) => {
     const handler = (_: any, data: any) => callback(data)
     ipcRenderer.on('loopback-chunk', handler)
